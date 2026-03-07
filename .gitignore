@@ -10,3 +10,4 @@ expandedPROJECT_MAP.txt
 retractedPROJECT_MAP.txt
 .env
 ~/.config/aicli/
+*.png
