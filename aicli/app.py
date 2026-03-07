@@ -8,7 +8,7 @@ Commands:
   repl    — Interactive REPL loop
   export  — Export session to markdown or JSON
   agent   — Autonomous multi-step task execution
-  config  — Configuration management (set-key, show, edit)
+  config  — Configuration management (set-key, set, get, show, edit)
   provider — Provider management (status, test)
   session — Session management (list, show, delete)
 
@@ -16,6 +16,7 @@ Usage:
   aicli ask "list python files in current dir"
   aicli ask --shell "find all large files"
   aicli ask --code "write a merge sort in Python"
+  aicli ask --web "latest Python 3.13 features"
   aicli chat --session myproject
   aicli repl
   aicli export myproject > session.md
@@ -24,6 +25,8 @@ Usage:
   aicli agent --dry-run "deploy my app"
   aicli provider status
   aicli config set-key groq
+  aicli config set TAVILY_API_KEY tvly-xxxx
+  aicli config get TAVILY_API_KEY
 """
 
 import asyncio
@@ -68,9 +71,11 @@ def cli(ctx):
 @click.option("--context", "-x", is_flag=True, help="Inject semantically relevant context from indexed files and chat history")
 @click.option("--context-depth", default=1, type=int, help="Context retrieval depth multiplier (default: 1, more=deeper search)")
 @click.option("--image", "-i", "images", multiple=True, type=click.Path(exists=True), help="Image path(s) to include (vision providers only: OpenRouter, Gemini)")
-def ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images):
+@click.option("--web", "-w", is_flag=True, help="Search the web before answering (no API key required)")
+@click.option("--web-debug", is_flag=True, help="Debug web search — show raw responses from both endpoints")
+def ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images, web, web_debug):
     """Single-shot prompt. Pipe stdin or pass prompt as argument."""
-    asyncio.run(_ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images=images or None))
+    asyncio.run(_ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images=images or None, web=web, web_debug=web_debug))
 
 
 # ── chat ─────────────────────────────────────────────────────────────────────────
@@ -121,6 +126,42 @@ def config_set_key(provider):
         print_error("No key entered.")
 
 
+@config.command("set")
+@click.argument("key")
+@click.argument("value")
+def config_set(key, value):
+    """Set any config key/env value. Stored in encrypted keys file.
+
+    \b
+    Examples:
+      aicli config set TAVILY_API_KEY tvly-xxxx
+      aicli config set OPENROUTER_API_KEY sk-or-xxxx
+      aicli config set AICLI_PROXY socks5://127.0.0.1:9050
+    """
+    save_api_key(key, value)
+    masked = value[:8] + "..." + value[-4:] if len(value) > 12 else "***"
+    print_success(f"Saved: {key} = {masked}")
+
+
+@config.command("get")
+@click.argument("key")
+def config_get(key):
+    """Get a stored config value by key.
+
+    \b
+    Examples:
+      aicli config get TAVILY_API_KEY
+      aicli config get OPENROUTER_API_KEY
+    """
+    from .config import get_config_value
+    value = get_config_value(key)
+    if value:
+        masked = value[:8] + "..." + value[-4:] if len(value) > 12 else "***"
+        print_success(f"{key} = {masked}")
+    else:
+        print_error(f"No value found for: {key}")
+
+
 @config.command("show")
 def config_show():
     """Show current configuration."""
@@ -135,6 +176,12 @@ def config_show():
     print("  GEMINI_API_KEY        Gemini         — vision support (--image flag)")
     print("  MISTRAL_API_KEY       Mistral        — fallback text provider")
     print("  (Ollama needs no key  — runs locally on http://localhost:11434)")
+    print()
+    print("\n\033[1mOptional env vars\033[0m\n")
+    print("  TAVILY_API_KEY        Tavily         — web search (--web flag, 1000 req/month free)")
+    print("  AICLI_PROXY           Proxy/Tor      — e.g. socks5://127.0.0.1:9050")
+    print()
+    print("\033[1mTip:\033[0m  aicli config set KEY value  — stores any key in the encrypted keys file")
     print()
 
 

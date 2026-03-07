@@ -148,6 +148,29 @@ def get_api_key(provider: str, prompt: bool = False) -> str | None:
     return key or None
 
 
+def get_config_value(key: str) -> str | None:
+    """
+    Get any stored value by its exact key name.
+    Checks (in order): env var → OS keychain (keyring) → encrypted keys file.
+    Used by non-provider integrations like TAVILY_API_KEY, AICLI_PROXY, etc.
+    """
+    # 1. Direct env var (e.g. TAVILY_API_KEY set in shell)
+    env_val = os.environ.get(key)
+    if env_val:
+        return env_val
+    # 2. OS keychain — same store save_api_key() uses when keyring is available
+    if _KEYRING_AVAILABLE:
+        try:
+            kr_val = _keyring.get_password(_KEYRING_SERVICE, key)
+            if kr_val:
+                return kr_val
+        except Exception:
+            pass
+    # 3. Encrypted Fernet file fallback
+    keys = _load_keys_raw()
+    return keys.get(key)
+
+
 def _key_url(provider: str) -> str:
     urls = {
         "groq": "https://console.groq.com/keys",
