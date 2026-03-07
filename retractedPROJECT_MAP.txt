@@ -1,0 +1,330 @@
+================================================================================
+aicli — PROJECT STRUCTURE MAP
+Generated: 2026-03-07 02:25:58
+================================================================================
+
+aicli is a terminal AI assistant with 5-provider failover, encrypted SQLite
+conversation memory (3-layer CMA: Hot/Warm/ChromaDB RAG), shell command generation,
+REPL mode, session export, and autonomous agent mode. Published to PyPI as aicli-maxmux 1.0.0.
+
+Package:     aicli-maxmux 1.0.0
+Entry point: aicli = "aicli.app:cli"
+Codebase:    2,854 lines of Python (cloc, 43 files)
+
+================================================================================
+FULL PROJECT TREE (core source only — no venv / pycache)
+================================================================================
+
+.
+├── aicli
+│   ├── context
+│   │   ├── embeddings.py
+│   │   ├── __init__.py
+│   │   ├── manager.py
+│   │   └── retriever.py
+│   ├── db
+│   │   ├── chat_db.py
+│   │   ├── crypto.py
+│   │   └── __init__.py
+│   ├── handlers
+│   │   ├── agent.py
+│   │   ├── chat.py
+│   │   ├── default.py
+│   │   ├── export.py
+│   │   ├── handler.py
+│   │   ├── index.py
+│   │   ├── __init__.py
+│   │   ├── provider.py
+│   │   └── repl.py
+│   ├── providers
+│   │   ├── base.py
+│   │   ├── gemini.py
+│   │   ├── groq.py
+│   │   ├── __init__.py
+│   │   ├── mistral.py
+│   │   ├── ollama.py
+│   │   ├── openrouter.py
+│   │   ├── pipeline.py
+│   │   └── registry.py
+│   ├── tools
+│   │   ├── builtin
+│   │   │   ├── __init__.py
+│   │   │   ├── read_file.py
+│   │   │   └── shell.py
+│   │   ├── __init__.py
+│   │   └── loader.py
+│   ├── app.py
+│   ├── config.py
+│   ├── __init__.py
+│   ├── integration.py
+│   ├── __main__.py
+│   ├── printer.py
+│   ├── role.py
+│   ├── tokens.py
+│   └── __version__.py
+├── .github
+│   └── workflows
+│       └── test.yml
+├── tests
+│   ├── conftest.py
+│   ├── __init__.py
+│   ├── test_aicli.py
+│   └── test_integration.py
+├── expand.sh
+├── map_structure.sh
+├── PROJECT_MAP.txt
+├── pyproject.toml
+├── requirements.txt
+├── retract.sh
+└── stats_final.sh
+
+11 directories, 51 files
+
+================================================================================
+MODULE REFERENCE — WHAT EACH FILE DOES
+================================================================================
+
+ROOT
+────
+  app.py              ← (in aicli/) CLI entry point — all click commands:
+                         ask, chat, repl, index, provider, export, agent, config, _provider_test
+  __main__.py         ← python -m aicli dispatcher
+  __init__.py         ← package init + version re-export
+  __version__.py      ← single source of truth for version string
+  config.py           ← AICLI_* env var resolution, API key get/set,
+                         Fernet encryption key derivation from machine ID,
+                         CHROMA_DIR path for ChromaDB cold layer
+  printer.py          ← streaming output + rich markdown rendering
+  tokens.py           ← token estimation (char/4 heuristic; tiktoken-ready)
+  integration.py      ← integration helpers (component wiring, mocked — not live API)
+  role.py             ← system role/persona management
+
+PROVIDERS/
+──────────
+  pipeline.py         ← THE CORE ENGINE
+                         • PROVIDER_MODELS dict (must live here, not config.py)
+                         • 5-provider failover: Groq→OpenRouter→Gemini→Mistral→Ollama
+                         • cooldown_until timestamps — instant failover, no sleep()
+                         • stream_with_fallback() — async generator
+  registry.py         ← ProviderRegistry: maps name → provider class,
+                         resolves active provider, validates at startup
+  base.py             ← BaseProvider ABC: stream(), test_connection()
+  groq.py             ← Groq provider — User-Agent: curl/8.5.0 (REQUIRED)
+  openrouter.py       ← OpenRouter — model: openrouter/auto (stable choice)
+  gemini.py           ← Google Gemini provider
+  mistral.py          ← Mistral provider
+  ollama.py           ← Local Ollama fallback (no API key needed)
+  __init__.py         ← exports all provider classes
+
+DB/
+───
+  chat_db.py          ← SQLite conversation store
+                         • db.save() ALWAYS FIRST — before token count, before prune
+                         • Sessions: named (slug) or UUID auto-generated
+                         • [AUTO-SUMMARY] blocks protected from trim_messages()
+                         • datetime.now(timezone.utc) — no deprecation warnings
+  crypto.py           ← Fernet symmetric encryption
+                         • Key = PBKDF2(machine_id + salt)
+                         • machine_id from /etc/machine-id or platform.node()
+                         • All message content encrypted at rest in SQLite
+  __init__.py
+
+CONTEXT/
+────────
+  manager.py          ← 3-layer Contextual Memory Architecture (CMA)
+                         🔥 Hot  — in-memory list (current session)
+                         🌡️ Warm — SQLite + async [AUTO-SUMMARY] at 80% token threshold
+                         ❄️ Cold — ChromaDB RAG, auto-indexed every turn (BUILT)
+                         • trim_messages() prunes oldest, preserves [AUTO-SUMMARY]
+                         • fire-and-forget async summarization + cold indexing tasks
+                         • _index_message_cold() — upserts 1 message per turn
+                         • _backfill_cold() — indexes full session on first load
+  embeddings.py       ← ChromaDB LocalContext + ChatContextStore (active)
+  retriever.py        ← ChromaDB ContextRetriever — unified search interface (active)
+  __init__.py
+
+HANDLERS/
+─────────
+  handler.py          ← BaseHandler ABC
+  chat.py             ← Persistent chat session handler: named sessions, REPL loop,
+                         RAG retrieval + indexing (--context flag), streams response,
+                         updates CMA; Ctrl+C → await_pending_summarization()
+  repl.py             ← Interactive REPL loop — persists ContextManager across
+                         turns (fixed Session 4: was plain list, lost history)
+  default.py          ← Default/fallback handler
+  export.py           ← F1: aicli export — dumps session to Markdown or JSON
+  agent.py            ← F3: aicli agent — plan/execute/feedback loop
+  index.py            ← aicli index — file + chat indexing for RAG
+  provider.py         ← aicli provider status + test commands
+  __init__.py
+
+TOOLS/
+──────
+  loader.py           ← Tool plugin loader — scans tools/builtin/ + tools/user/
+  __init__.py
+  builtin/
+    shell.py          ← Shell command tool: Edit/Make/Delete/Apply/Run (E/M/D/A/R)
+                         • shell=False everywhere (security)
+                         • 12 HIGH_RISK_PATTERNS checked before execution
+                         • Self-correction loop: on error → re-prompt with stderr
+    read_file.py      ← Read file tool (feeds content to LLM context)
+    __init__.py
+
+TESTS/
+──────
+  test_aicli.py       ← 24 unit tests (mocks/patches, no live API)
+                         Tests: config, crypto, db, providers, tokens, shell
+                         → run alone: python -m pytest tests/test_aicli.py -v
+  test_integration.py ← 15 integration tests (component wiring, still mocked)
+                         → run alone: python -m pytest tests/test_integration.py -v
+                         → run all:   python -m pytest tests/ -v
+  conftest.py         ← pytest fixtures: tmp_db, mock_provider, env cleanup
+  __init__.py
+
+CONFIG FILES
+────────────
+  requirements.txt    ← Python deps: click, cryptography, pytest, ...
+  pyproject.toml      ← Build config + entry_points for `aicli` CLI command
+  .github/workflows/test.yml ← CI pipeline (51 lines)
+
+SCRIPTS
+───────
+  expand.sh           ← creates venv, installs deps, pip install -e ., verifies imports
+  retract.sh          ← removes venv + all build artifacts, leaves core source only
+  stats_final.sh      ← accurate project statistics (cloc + find + per-file breakdown)
+  map_structure.sh    ← generates PROJECT_MAP.txt (this file)
+
+================================================================================
+PROVIDER FAILOVER ORDER
+================================================================================
+
+  Priority  Provider      Model                    Key Env Var
+  ────────  ────────────  ───────────────────────  ──────────────────────
+  1 (🥇)   Groq          llama-3.3-70b-versatile  GROQ_API_KEY
+  2         OpenRouter    openrouter/auto           OPENROUTER_API_KEY
+  3         Gemini        gemini-1.5-flash          GEMINI_API_KEY
+  4         Mistral       mistral-small-latest      MISTRAL_API_KEY
+  5 (💾)   Ollama        llama3.2                  (local, no key)
+
+  Failover trigger: HTTP 4xx/5xx or timeout → set cooldown_until → try next
+  Recovery:         cooldown expires → provider re-enters rotation
+  User-Agent:       curl/8.5.0  (required — Python-urllib/3.12 is blocked by Groq)
+
+================================================================================
+BUG REGISTRY (All 10 — Sessions 1–5)
+================================================================================
+
+  #   Session  File                  Symptom → Root Cause → Fix
+  ──  ───────  ────────────────────  ──────────────────────────────────────────
+  1   S2       providers/groq.py     Groq 403 → User-Agent blocked → curl/8.5.0
+  2   S2       db/chat_db.py         83 deprecation warnings → utcnow() → now(tz)
+  3   S3       providers/*.py        Gemini/Mistral/OpenRouter 403 → same UA fix
+  4   S3       providers/openrouter  Model instability → 3 tries → openrouter/auto
+  5   S3       providers/pipeline.py "Ollama not running" → PROVIDER_MODELS missing
+                                     from pipeline.py → model=None → 4xx cascade
+                                     THIS IS THE MOST DECEPTIVE BUG. Symptom had
+                                     nothing to do with root cause.
+  6   S4       handlers/repl.py      REPL lost history → no ContextManager → fixed
+  7   S4       app.py                providers_map NameError → missing import
+  8   S4       app.py                _provider_test used stale PROVIDER_MODELS
+  9   S1       config.py             get_api_key() prompt behavior (edge case)
+  10  S5       db/chat_db.py         session_name stored as ID not slug
+
+  Coverage: 8/10 historical bugs were caught by integration tests — now covered.
+
+================================================================================
+CONTEXTUAL MEMORY ARCHITECTURE (CMA)
+================================================================================
+
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │  🔥 HOT LAYER — In-Memory                                           │
+  │     Current session messages in ContextManager._active_messages     │
+  │     Lost on process exit (REPL persists within session)             │
+  ├─────────────────────────────────────────────────────────────────────┤
+  │  🌡️ WARM LAYER — SQLite (chat_db.py + crypto.py)                    │
+  │     All messages encrypted with Fernet + machine fingerprint        │
+  │     db.save() called FIRST — unconditional, always                  │
+  │     At 80% token threshold → fire-and-forget async summarization    │
+  │     [AUTO-SUMMARY] blocks immune to trim_messages() pruning         │
+  │     Sessions: named slug OR auto UUID                               │
+  ├─────────────────────────────────────────────────────────────────────┤
+  │  ❄️ COLD LAYER — ChromaDB RAG  ✅ BUILT                              │
+  │     Auto-indexed every turn via _index_message_cold() (Step 5)      │
+  │     context/embeddings.py + context/retriever.py — fully active     │
+  │     Retrieval: inject via --context flag in chat.py                  │
+  │     Degradation: chromadb missing → _rag_enabled=False → silent no-op│
+  └─────────────────────────────────────────────────────────────────────┘
+
+  The one rule: db.save() ALWAYS FIRST. Before token counting. Before pruning.
+  Violating this = data loss on crash.
+
+================================================================================
+BUILD ROADMAP — WHAT'S DONE vs. WHAT'S NEXT
+================================================================================
+
+  ✅ Phase 1  Core CLI + Groq streaming                       COMPLETE
+  ✅ Phase 2  5-provider failover + User-Agent fix            COMPLETE
+  ✅ Phase 3  SQLite CMA + Fernet encryption                  COMPLETE
+  ✅ Phase 4  REPL persistence + shell E/M/D/A/R              COMPLETE
+  ✅ Phase 5  keyring + httpx + rich + pyproject entry point  COMPLETE
+  ✅ Phase 6  PyPI publish (aicli-maxmux 1.0.0)               COMPLETE
+  ✅ F1       aicli export (markdown + JSON)                  COMPLETE
+  ✅ F3       aicli agent (plan/execute/feedback loop)        COMPLETE
+  ✅          ChromaDB RAG (cold layer) — fully built         COMPLETE
+  🔲 F2       --image multimodal flag                         NOT BUILT
+
+  Installed and active:
+    keyring   → OS keychain storage (active)
+    httpx     → native async HTTP (active)
+    rich      → markdown rendering (active)
+    chromadb  → ChromaDB RAG cold layer (active) ✅
+
+  Installed, dormant (not yet wired in):
+    tiktoken  → exact token counting (replaces char/4 heuristic ±15-25%)
+
+
+================================================================================
+FILE STATISTICS
+================================================================================
+
+  Total Python files:                43 files
+  Total Python lines:              4352 lines
+
+  Per-module line counts:
+    aicli/app.py                               307 lines
+    aicli/config.py                            219 lines
+    aicli/printer.py                            92 lines
+    aicli/tokens.py                            128 lines
+    aicli/role.py                               60 lines
+    aicli/integration.py                        77 lines
+    aicli/providers/pipeline.py                196 lines
+    aicli/providers/registry.py                 34 lines
+    aicli/providers/base.py                     27 lines
+    aicli/providers/groq.py                    110 lines
+    aicli/providers/openrouter.py              114 lines
+    aicli/providers/gemini.py                  110 lines
+    aicli/providers/mistral.py                 110 lines
+    aicli/providers/ollama.py                   72 lines
+    aicli/db/chat_db.py                        175 lines
+    aicli/db/crypto.py                          23 lines
+    aicli/context/manager.py                   323 lines
+    aicli/context/embeddings.py                274 lines
+    aicli/context/retriever.py                  94 lines
+    aicli/handlers/chat.py                     155 lines
+    aicli/handlers/repl.py                     128 lines
+    aicli/handlers/handler.py                    1 lines
+    aicli/handlers/default.py                  131 lines
+    aicli/handlers/export.py                    87 lines
+    aicli/handlers/agent.py                    212 lines
+    aicli/handlers/index.py                     39 lines
+    aicli/handlers/provider.py                  55 lines
+    aicli/tools/loader.py                        1 lines
+    aicli/tools/builtin/shell.py               217 lines
+    aicli/tools/builtin/read_file.py             1 lines
+    tests/test_aicli.py                        353 lines
+    tests/test_integration.py                  382 lines
+    tests/conftest.py                           39 lines
+
+================================================================================
+End of aicli PROJECT_MAP.txt
+
