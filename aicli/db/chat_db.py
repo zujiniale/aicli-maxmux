@@ -199,3 +199,71 @@ def delete_session(conn: sqlite3.Connection, session_id: str) -> None:
     conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
     conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
+
+
+def fork_session(
+    conn: sqlite3.Connection,
+    source_session_id: str,
+    new_name: str,
+    up_to_message_id: Optional[int] = None,
+) -> str:
+    """
+    Fork a session by copying its messages into a new session.
+
+    `up_to_message_id` is 1-indexed position within the session (NOT the global DB id).
+    E.g. up_to_message_id=5 copies the first 5 messages of the session.
+    If None, copies ALL messages.
+
+    Returns the new session's UUID.
+    """
+    import uuid as _uuid
+
+    source = conn.execute(
+        "SELECT name, role FROM sessions WHERE id = ?", (source_session_id,)
+    ).fetchone()
+    if not source:
+        raise ValueError(f"Source session not found: {source_session_id}")
+
+    # Use LIMIT N for positional slicing — message IDs are global autoincrement,
+    # so id <= N would match nothing for sessions with high-numbered message IDs.
+    if up_to_message_id is not None:
+        rows = conn.execute("""
+            SELECT role, content, token_count, created_at FROM messages
+            WHERE session_id = ?
+            ORDER BY id ASC
+            LIMIT ?
+        """, (source_session_id, up_to_message_id)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT role, content, token_count, created_at FROM messages
+            WHERE session_id = ?
+            ORDER BY id ASC
+        """, (source_session_id,)).fetchall()
+
+    new_id = str(_uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute("""
+        INSERT INTO sessions (id, name, role, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (new_id, new_name, source["role"], now, now))
+
+    for row in rows:
+        conn.execute("""
+            INSERT INTO messages (session_id, role, content, token_count, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (new_id, row["role"], row["content"], row["token_count"], row["created_at"]))
+
+    # Copy the latest summary so the fork starts with full context intact
+    summary_row = conn.execute("""
+        SELECT summary, covers_from, covers_to, created_at FROM summaries
+        WHERE session_id = ?
+        ORDER BY id DESC LIMIT 1
+    """, (source_session_id,)).fetchone()
+    if summary_row:
+        conn.execute("""
+            INSERT INTO summaries (session_id, summary, covers_from, covers_to, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (new_id, summary_row["summary"], summary_row["covers_from"], summary_row["covers_to"], summary_row["created_at"]))
+
+    conn.commit()
+    return new_id

@@ -10,7 +10,7 @@ Commands:
   agent   — Autonomous multi-step task execution
   config  — Configuration management (set-key, set, get, show, edit)
   provider — Provider management (status, test)
-  session — Session management (list, show, delete)
+  session — Session management (list, show, delete, fork, fork --from-message N)
 
 Usage:
   aicli ask "list python files in current dir"
@@ -25,6 +25,8 @@ Usage:
   aicli agent --dry-run "deploy my app"
   aicli provider status
   aicli config set-key groq
+  aicli session fork myproject
+  aicli session fork myproject --from-message 12
   aicli config set TAVILY_API_KEY tvly-xxxx
   aicli config get TAVILY_API_KEY
 """
@@ -35,7 +37,7 @@ import click
 
 from .config import load_config, get_api_key, save_api_key, CONFIG_FILE
 from .printer import print_error, print_success, print_info, print_provider_status
-from .db.chat_db import get_connection, list_sessions, load_messages, delete_session
+from .db.chat_db import get_connection, list_sessions, load_messages, delete_session, fork_session
 
 from .handlers.default import _ask
 from .handlers.chat import _chat
@@ -50,7 +52,7 @@ from .handlers.agent import _agent
 
 @click.group(invoke_without_command=True)
 @click.pass_context
-@click.version_option(version="1.1.0", prog_name="aicli")
+@click.version_option(version="1.2.0", prog_name="aicli")
 def cli(ctx):
     """aicli — Free, private, async CLI AI. Run 'aicli ask \"your prompt\"' to start."""
     if ctx.invoked_subcommand is None:
@@ -72,10 +74,14 @@ def cli(ctx):
 @click.option("--context-depth", default=1, type=int, help="Context retrieval depth multiplier (default: 1, more=deeper search)")
 @click.option("--image", "-i", "images", multiple=True, type=click.Path(exists=True), help="Image path(s) to include (vision providers only: OpenRouter, Gemini)")
 @click.option("--web", "-w", is_flag=True, help="Search the web before answering (no API key required)")
-@click.option("--web-debug", is_flag=True, help="Debug web search — show raw responses from both endpoints")
-def ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images, web, web_debug):
+@click.option("--web-debug", is_flag=True, help="Debug web search — show raw responses from all backends")
+@click.option("--web-verbose", is_flag=True, help="Show all backends in --web-debug, including empty/failed ones")
+@click.option("--cross-session", is_flag=True, help="Search RAG context across ALL sessions (requires --context)")
+@click.option("--context-debug", is_flag=True, help="Show which sources were injected as context (requires --context)")
+@click.option("--min-score", "min_score", default=0.40, type=float, help="Minimum similarity score for RAG context (default: 0.40)")
+def ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images, web, web_debug, web_verbose, cross_session, context_debug, min_score):
     """Single-shot prompt. Pipe stdin or pass prompt as argument."""
-    asyncio.run(_ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images=images or None, web=web, web_debug=web_debug))
+    asyncio.run(_ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images=images or None, web=web, web_debug=web_debug, web_verbose=web_verbose, cross_session=cross_session, context_debug=context_debug, min_score=min_score))
 
 
 # ── chat ─────────────────────────────────────────────────────────────────────────
@@ -134,7 +140,9 @@ def config_set(key, value):
 
     \b
     Examples:
-      aicli config set TAVILY_API_KEY tvly-xxxx
+      aicli session fork myproject
+  aicli session fork myproject --from-message 12
+  aicli config set TAVILY_API_KEY tvly-xxxx
       aicli config set OPENROUTER_API_KEY sk-or-xxxx
       aicli config set AICLI_PROXY socks5://127.0.0.1:9050
     """
@@ -242,11 +250,12 @@ def session_list():
     if not sessions:
         print_info("No sessions yet. Start with: aicli chat")
         return
-    print(f"\n{'ID':<12} {'Name':<20} {'Messages':<10} {'Updated'}")
+    print(f"\n{'ID':<10} {'Name':<28} {'Msgs':<6} {'Updated'}")
     print("─" * 60)
     for s in sessions:
         updated = s["updated_at"][:10] if s["updated_at"] else "unknown"
-        print(f"{s['id']:<12} {s['name']:<20} {s['message_count']:<10} {updated}")
+        sid = s["id"][:8]  # show short ID but user can use full name
+        print(f"{sid:<10} {s['name']:<28} {s['message_count']:<6} {updated}  ({s['id']})")
     print()
 
 
@@ -323,9 +332,10 @@ def export(session_name, fmt, output):
 @click.option("--model", "-m", default=None, help="Override model")
 @click.option("--dry-run", is_flag=True, help="Show plan without executing")
 @click.option("--yes", "-y", is_flag=True, help="Auto-confirm all steps (use with care)")
-def agent(task, model, dry_run, yes):
+@click.option("--image", "-i", "images", multiple=True, type=click.Path(exists=True), help="Image path(s) to include (vision providers only: OpenRouter, Gemini)")
+def agent(task, model, dry_run, yes, images):
     """Autonomous multi-step agent. Plans and executes shell commands to complete a task."""
-    asyncio.run(_agent(" ".join(task), model, dry_run, yes))
+    asyncio.run(_agent(" ".join(task), model, dry_run, yes, images=list(images) if images else None))
 
 
 # ── session summary ──────────────────────────────────────────────────────────────
@@ -350,6 +360,186 @@ def session_summary(session_name):
         print(f"\033[90m{summary}\033[0m\n")
     else:
         print_info(f"No summary yet for session: {session_name}")
+
+
+# ── session fork ─────────────────────────────────────────────────────────────────
+
+@session.command("fork")
+@click.argument("session_name")
+@click.option("--from-message", "from_message", default=None, type=int,
+              help="Copy messages up to and including this message ID (default: all)")
+@click.option("--name", "fork_name", default=None,
+              help="Name for the new forked session (default: <source>-fork-<n>)")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def session_fork(session_name, from_message, fork_name, yes):
+    """Fork a session — copy its messages into a new session to explore alternatives.
+
+    \b
+    Examples:
+      aicli session fork myproject                        # copy all messages
+      aicli session fork myproject --from-message 12      # copy messages 1-12
+      aicli session fork myproject --name myproject-v2   # custom fork name
+    """
+    conn = get_connection()
+    sessions = list_sessions(conn)
+    matching = [s for s in sessions if s["name"] == session_name or s["id"] == session_name]
+    if not matching:
+        print_error(f"Session not found: {session_name}")
+        return
+
+    source = matching[0]
+    source_id   = source["id"]
+    source_name = source["name"]
+    msg_count   = source["message_count"]
+
+    # Auto-generate fork name if not provided: myproject-fork-1, -2, ...
+    if not fork_name:
+        existing_names = {s["name"] for s in sessions}
+        idx = 1
+        while f"{source_name}-fork-{idx}" in existing_names:
+            idx += 1
+        fork_name = f"{source_name}-fork-{idx}"
+
+    if from_message is not None and from_message < 1:
+        print_error("--from-message must be >= 1")
+        return
+
+    desc = f"messages 1-{from_message} of {msg_count}" if from_message is not None else f"all {msg_count} messages"
+
+    if not yes:
+        print(f"\n  Fork  : {source_name} -> {fork_name}")
+        print(f"  Copy  : {desc}")
+        confirm = input("  Proceed? [y/N] ")
+        if confirm.lower() != "y":
+            print("  Cancelled.")
+            return
+
+    try:
+        new_id = fork_session(conn, source_id, fork_name, up_to_message_id=from_message)
+        copied = len(load_messages(conn, new_id))
+        print_success(f"Forked -> '{fork_name}' ({copied} messages copied)")
+        print(f"  Continue: aicli chat --session {fork_name}")
+    except ValueError as e:
+        print_error(str(e))
+
+
+
+
+# ── session rename ────────────────────────────────────────────────────────────────
+
+@session.command("rename")
+@click.argument("session_name")
+@click.argument("new_name")
+def session_rename(session_name, new_name):
+    """Rename a session.
+
+    \b
+    Examples:
+      aicli session rename fa2bffaf myproject
+      aicli session rename old-name new-name
+    """
+    conn = get_connection()
+    sessions = list_sessions(conn)
+    matching = [s for s in sessions if s["name"] == session_name or s["id"] == session_name]
+    if not matching:
+        print_error(f"Session not found: {session_name}")
+        return
+
+    # Check new name isn't already taken
+    taken = [s for s in sessions if s["name"] == new_name and s["id"] != matching[0]["id"]]
+    if taken:
+        print_error(f"Name already in use: {new_name}")
+        return
+
+    session_id = matching[0]["id"]
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute("UPDATE sessions SET name = ?, updated_at = ? WHERE id = ?", (new_name, now, session_id))
+    conn.commit()
+    print_success(f"Renamed '{session_name}' → '{new_name}'")
+
+
+# ── session summarize ─────────────────────────────────────────────────────────────
+
+@session.command("summarize")
+@click.argument("session_name")
+@click.option("--model", "-m", default=None, help="Override model for summarization")
+@click.option("--print-only", is_flag=True, help="Print result but do not save to DB")
+def session_summarize(session_name, model, print_only):
+    """Generate (or regenerate) a summary for a session without resuming it.
+
+    \b
+    Examples:
+      aicli session summarize myproject
+      aicli session summarize fa2bffaf --model groq
+      aicli session summarize myproject --print-only
+    """
+    import asyncio as _asyncio
+
+    conn = get_connection()
+    sessions = list_sessions(conn)
+    matching = [s for s in sessions if s["name"] == session_name or s["id"] == session_name]
+    if not matching:
+        print_error(f"Session not found: {session_name}")
+        return
+
+    source = matching[0]
+    session_id   = source["id"]
+    source_name  = source["name"]
+    msg_count    = source["message_count"]
+
+    if msg_count < 4:
+        print_error(f"Session '{source_name}' has only {msg_count} messages — need at least 4 to summarize.")
+        return
+
+    print_info(f"Summarizing '{source_name}' ({msg_count} messages)...")
+
+    async def _run():
+        from .config import load_config
+        from .providers.pipeline import ProviderPipeline, ProviderExhaustedError
+        from .context.manager import ContextManager
+
+        config = load_config()
+        try:
+            pipeline = ProviderPipeline(
+                provider_chain=config["provider_chain"],
+                cooldown_seconds=config["cooldown_seconds"],
+                max_retries_per_provider=config["max_retries_per_provider"],
+            )
+            if model:
+                pipeline._model_override = model
+        except ProviderExhaustedError as e:
+            print_error(str(e))
+            return
+
+        ctx = ContextManager(
+            session_id=session_id,
+            pipeline=pipeline,
+            session_name=source_name,
+            config=config,
+        )
+        await ctx.initialize()
+
+        # Temporarily disable saving if --print-only
+        if print_only:
+            from aicli.db import chat_db as _cdb
+            _orig_save = _cdb.save_summary
+            _cdb.save_summary = lambda *a, **kw: None
+
+        summary = await ctx.summarize_now()
+
+        if print_only:
+            _cdb.save_summary = _orig_save
+
+        if summary:
+            print(f"\n[1mSummary: {source_name}[0m\n")
+            print(f"[90m{summary}[0m\n")
+            if not print_only:
+                print_success("Summary saved.")
+        else:
+            print_error("Summarization failed or returned empty.")
+
+    _asyncio.run(_run())
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────────

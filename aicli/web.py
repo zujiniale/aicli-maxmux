@@ -71,15 +71,23 @@ _USER_AGENTS = [
 
 # SearXNG public instances — rotated randomly, skipped on failure
 # See full list: https://searx.space/
+# Updated 2026-03-07 — prior list was fully rate-limited / dead
 _SEARXNG_INSTANCES = [
-    "https://searx.be",
-    "https://search.bus-hit.me",
-    "https://paulgo.io",
-    "https://searx.tiekoetter.com",
-    "https://opnxng.com",
-    "https://searx.gnu.style",
-    "https://search.inetol.net",
-    "https://etsi.me",
+    "https://search.sapti.me",
+    "https://searx.perennialte.ch",
+    "https://search.hbubli.cc",
+    "https://searx.work",
+    "https://nyc1.sx.ggtyler.dev",
+    "https://sx.ca.idealist.gay",
+    "https://searx.sev.monster",
+    "https://search.ononoki.org",
+    "https://searx.fmac.xyz",
+    "https://searx.hu",
+    "https://copp.gg",
+    "https://search.rowie.at",
+    "https://priv.au",
+    "https://searx.tiekoetter.com",   # kept — sometimes works
+    "https://searx.be",               # kept — sometimes works
 ]
 
 _DDG_API_URL  = "https://api.duckduckgo.com/"
@@ -207,6 +215,7 @@ async def _search_searxng(query: str, max_results: int, loop, opener) -> Optiona
             if results:
                 return results
         except Exception:
+            await asyncio.sleep(2)  # brief pause before trying next instance
             continue
     return None
 
@@ -446,6 +455,8 @@ async def web_search(query: str, max_results: int = _MAX_RESULTS) -> Optional[st
     # This prevents "coroutine never awaited" warnings for skipped backends
     # (e.g. Tavily when no key is set) and ensures the chain never
     # breaks early due to a stale coroutine object raising on await.
+    # SearXNG is skipped when a SOCKS/Tor proxy is active — all public
+    # SearXNG instances block Tor exit nodes with 429/403.
     backends = [
         ("Tavily",   lambda: _search_tavily(query, max_results, loop, opener)),
         ("SearXNG",  lambda: _search_searxng(query, max_results, loop, opener)),
@@ -454,6 +465,8 @@ async def web_search(query: str, max_results: int = _MAX_RESULTS) -> Optional[st
         ("Bing",     lambda: _search_bing(query, max_results, loop, opener)),
         ("Mojeek",   lambda: _search_mojeek(query, max_results, loop, opener)),
     ]
+    if _SOCKS_ACTIVE:
+        backends = [(n, c) for n, c in backends if n != "SearXNG"]
 
     for name, make_coro in backends:
         try:
@@ -468,17 +481,25 @@ async def web_search(query: str, max_results: int = _MAX_RESULTS) -> Optional[st
 
 # ── Debug function (used by --web-debug flag) ─────────────────────────────────
 
-async def web_search_debug(query: str) -> None:
+async def web_search_debug(query: str, verbose: bool = False) -> None:
     """
     Print raw responses from all backends for diagnosis.
     Used by --web-debug flag — no LLM call made.
     Shows proxy status, which backends are active, and what each returns.
+
+    verbose=False (default): only print backends that have results or are skipped
+                             for a known reason. Empty/failed backends are suppressed.
+    verbose=True  (--web-verbose): print every backend regardless of outcome.
     """
     loop   = asyncio.get_event_loop()
-    opener = _get_opener()
+    opener = _get_opener()              # MUST be first — triggers SOCKS init + keyring context
 
     proxy  = _cfg("AICLI_PROXY")
-    tavily = _cfg("TAVILY_API_KEY")  # reads keyring + Fernet, not just env
+    tavily = _cfg("TAVILY_API_KEY")     # reads keyring + Fernet, not just env
+    # Under Tor (AICLI_PROXY set via env), keyring may need a second read
+    # after _get_opener() has fully initialized the process context.
+    if not tavily:
+        tavily = _cfg("TAVILY_API_KEY")
 
     print(f"\n\033[1m[web debug] Query: {query}\033[0m")
     if proxy:
@@ -487,55 +508,76 @@ async def web_search_debug(query: str) -> None:
     else:
         print("  Proxy:  (none — direct connection)")
     print(f"  Tavily: {'key set ✓' if tavily else '(no TAVILY_API_KEY — skipped)'}")
+    if not verbose:
+        print("  (pass --web-verbose to show all backends including empty/failed)")
     print()
 
     async def _run(name, make_coro):
-        print(f"── {name} {'─' * max(0, 44 - len(name))}")
+        """Run a backend. In non-verbose mode, suppress empty/failed output."""
         try:
             results = await make_coro()
             if results:
+                print(f"── {name} {'─' * max(0, 44 - len(name))}")
                 print(f"  ✓ {len(results)} result(s):")
                 for r in results:
                     print(f"    [{r['title'][:55]}]")
                     if r.get("snippet"):
                         print(f"     {r['snippet'][:100]}")
-            else:
+                print()
+            elif verbose:
+                print(f"── {name} {'─' * max(0, 44 - len(name))}")
                 print("  ✗ No results (backend returned empty)")
+                print()
         except Exception as e:
-            print(f"  ✗ FAILED: {e}")
-        print()
+            if verbose:
+                print(f"── {name} {'─' * max(0, 44 - len(name))}")
+                print(f"  ✗ FAILED: {e}")
+                print()
 
-    # SearXNG — show which instance wins
-    print("── SearXNG (rotating instances) ────────────────")
-    instances = _SEARXNG_INSTANCES.copy()
-    random.shuffle(instances)
-    searxng_done = False
-    for base in instances:
-        try:
-            params = urllib.parse.urlencode({
-                "q": query, "format": "json", "language": "en",
-                "time_range": "", "safesearch": "0", "categories": "general",
-            })
-            req = urllib.request.Request(
-                f"{base}/search?{params}",
-                headers={"User-Agent": _ua(), "Accept": "application/json"},
-            )
-            rb = await loop.run_in_executor(None, lambda r=req: _fetch(r, opener))
-            data = json.loads(rb.decode("utf-8", errors="replace"))
-            results = _parse_searxng_results(data, _MAX_RESULTS)
-            if results:
-                print(f"  ✓ {base} → {len(results)} result(s)")
-                for r in results:
-                    print(f"    [{r['title'][:55]}]")
-                searxng_done = True
-                break
-            else:
-                print(f"  ~ {base} → 0 results (trying next)")
-        except Exception as e:
-            print(f"  ✗ {base} → {e}")
-    if not searxng_done:
-        print("  ✗ All SearXNG instances failed or returned 0 results")
-    print()
+    # SearXNG — show which instance wins (skipped under Tor — exit nodes are universally banned)
+    if _SOCKS_ACTIVE:
+        # Always show this — it's a meaningful status, not noise
+        print("── SearXNG (rotating instances) ────────────────")
+        print("  ~ Skipped — Tor exit nodes are blocked by all public SearXNG instances (429/403)")
+        print("    Use Tavily (TAVILY_API_KEY) for reliable search over Tor.")
+        print()
+    else:
+        instances = _SEARXNG_INSTANCES.copy()
+        random.shuffle(instances)
+        searxng_done = False
+        searxng_errors = []
+        for base in instances:
+            try:
+                params = urllib.parse.urlencode({
+                    "q": query, "format": "json", "language": "en",
+                    "time_range": "", "safesearch": "0", "categories": "general",
+                })
+                req = urllib.request.Request(
+                    f"{base}/search?{params}",
+                    headers={"User-Agent": _ua(), "Accept": "application/json"},
+                )
+                rb = await loop.run_in_executor(None, lambda r=req: _fetch(r, opener))
+                data = json.loads(rb.decode("utf-8", errors="replace"))
+                results = _parse_searxng_results(data, _MAX_RESULTS)
+                if results:
+                    print("── SearXNG (rotating instances) ────────────────")
+                    print(f"  ✓ {base} → {len(results)} result(s)")
+                    for r in results:
+                        print(f"    [{r['title'][:55]}]")
+                    print()
+                    searxng_done = True
+                    break
+                else:
+                    searxng_errors.append(f"  ~ {base} → 0 results")
+            except Exception as e:
+                searxng_errors.append(f"  ✗ {base} → {e}")
+                await asyncio.sleep(2)  # brief pause before trying next instance
+        if not searxng_done and verbose:
+            print("── SearXNG (rotating instances) ────────────────")
+            for line in searxng_errors:
+                print(line)
+            print("  ✗ All SearXNG instances failed or returned 0 results")
+            print()
 
     await _run("DDG JSON API",
                lambda: _search_ddg_api(query, _MAX_RESULTS, loop, opener))

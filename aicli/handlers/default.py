@@ -9,7 +9,7 @@ from ..tools.builtin.shell import shell_menu, execute_with_self_correction
 from ..image_utils import build_multimodal_content, is_multimodal
 
 
-async def _ask(prompt_parts, shell, code, describe, model, no_stream, json_output, dry_run, context=False, context_depth=1, images=None):
+async def _ask(prompt_parts, shell, code, describe, model, no_stream, json_output, dry_run, context=False, context_depth=1, images=None, web=False, web_debug=False, web_verbose=False, cross_session=False, context_debug=False, min_score=0.40):
     config = load_config()
 
     # Collect prompt from args and/or stdin
@@ -45,11 +45,45 @@ async def _ask(prompt_parts, shell, code, describe, model, no_stream, json_outpu
         try:
             from ..context.retriever import ContextRetriever
             retriever = ContextRetriever(CHROMA_DIR)
-            context_block = retriever.retrieve(prompt_text, depth=context_depth)
+            if cross_session:
+                print_info("Cross-session context active")
+            context_block = retriever.retrieve(prompt_text, depth=context_depth, min_score=min_score)
             if context_block:
+                if context_debug:
+                    print("\n[1m[context-debug] Sources injected:[0m")
+                    import re as _re
+                    for section in _re.split(r'\n\n(?=\[)', context_block):
+                        if section.startswith("RELEVANT CONTEXT:"):
+                            continue
+                        lines = section.strip().splitlines()
+                        if lines:
+                            print(f"  [33m{lines[0]}[0m")
+                            snippet = " ".join(lines[1:])[:120].strip()
+                            if snippet:
+                                print(f"  [90m{snippet}...[0m")
+                    print()
                 messages.append({"role": "system", "content": context_block})
+            elif context_debug:
+                print_info("[context-debug] No relevant context found in index.")
         except Exception as e:
             print_info(f"Context retrieval skipped: {e}")
+
+    # Inject web search results if --web flag set (F4)
+    if web_debug:
+        from ..web import web_search_debug
+        await web_search_debug(prompt_text, verbose=web_verbose)
+        return  # debug only — don't proceed to LLM
+    if web:
+        try:
+            from ..web import web_search
+            print_info(f"Searching the web for: {prompt_text[:80]}...")
+            web_block = await web_search(prompt_text)
+            if web_block:
+                messages.append({"role": "system", "content": web_block})
+            else:
+                print_info("Web search returned no results — continuing without.")
+        except Exception as e:
+            print_info(f"Web search skipped: {e}")
 
     # Build user message — multimodal if --image paths provided
     if images:

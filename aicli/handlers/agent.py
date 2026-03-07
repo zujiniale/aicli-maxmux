@@ -6,6 +6,7 @@ from ..role import get_role
 from ..printer import print_error, print_info, print_success, print_warning
 from ..providers.pipeline import ProviderPipeline, ProviderExhaustedError
 from ..tools.builtin.shell import execute_command, is_high_risk
+from ..image_utils import build_multimodal_content, is_multimodal
 
 
 _PLAN_SYSTEM = """You are an autonomous agent that completes multi-step tasks using shell commands.
@@ -46,7 +47,7 @@ Rules:
 """
 
 
-async def _agent(task: str, model: str | None, dry_run: bool, yes: bool):
+async def _agent(task: str, model: str | None, dry_run: bool, yes: bool, images: list | None = None):
     config = load_config()
 
     try:
@@ -59,18 +60,28 @@ async def _agent(task: str, model: str | None, dry_run: bool, yes: bool):
         print_error(str(e))
         sys.exit(1)
 
-    print_info(f"Agent task: {task}")
+    if images:
+        print_info(f"Agent task: {task} [{len(images)} image(s) attached]")
+    else:
+        print_info(f"Agent task: {task}")
     print_info("Generating plan...\n")
 
     # ── Step 1: Generate plan ─────────────────────────────────────────────────
+    # Build initial plan content — multimodal if images provided
+    requires_vision = bool(images)
+    if images:
+        plan_user_content = build_multimodal_content(f"Task: {task}", list(images))
+    else:
+        plan_user_content = f"Task: {task}"
+
     plan_messages = [
         {"role": "system", "content": _PLAN_SYSTEM},
-        {"role": "user", "content": f"Task: {task}"},
+        {"role": "user", "content": plan_user_content},
     ]
 
     try:
         chunks = []
-        async for chunk in pipeline.stream(plan_messages, model=model):
+        async for chunk in pipeline.stream(plan_messages, model=model, requires_vision=requires_vision):
             chunks.append(chunk)
             print(chunk, end="", flush=True)
         print("\n")
@@ -139,20 +150,27 @@ async def _agent(task: str, model: str | None, dry_run: bool, yes: bool):
             print(f"\033[33m{stderr.strip()}\033[0m")
 
         # ── Step 4: Observe result ────────────────────────────────────────────
+        observe_text = (
+            f"Task: {task}\n\n"
+            f"Step {step_num}: {desc}\n"
+            f"Command: {cmd}\n"
+            f"Exit code: {exit_code}\n"
+            f"Output:\n{output[:2000]}"  # cap output sent to AI
+        )
+        # Include original images in observer so it can visually verify results
+        if images:
+            observe_user_content = build_multimodal_content(observe_text, list(images))
+        else:
+            observe_user_content = observe_text
+
         observe_messages = [
             {"role": "system", "content": _OBSERVE_SYSTEM},
-            {"role": "user", "content": (
-                f"Task: {task}\n\n"
-                f"Step {step_num}: {desc}\n"
-                f"Command: {cmd}\n"
-                f"Exit code: {exit_code}\n"
-                f"Output:\n{output[:2000]}"  # cap output sent to AI
-            )},
+            {"role": "user", "content": observe_user_content},
         ]
 
         try:
             obs_chunks = []
-            async for chunk in pipeline.stream(observe_messages, model=model):
+            async for chunk in pipeline.stream(observe_messages, model=model, requires_vision=requires_vision):
                 obs_chunks.append(chunk)
             observation_raw = "".join(obs_chunks).strip()
         except ProviderExhaustedError:

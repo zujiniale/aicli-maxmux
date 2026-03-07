@@ -52,11 +52,12 @@ class ContextRetriever:
                 summaries = [r for r in all_results if r["type"] == "summary"]
                 messages  = [r for r in all_results if r["type"] != "summary"]
 
-                # Always include all summaries (they are the most complete context)
+                # Include summaries that meet the score threshold (preferred over raw chunks)
                 covered_sessions = set()
                 for r in summaries:
-                    sections.append(f"[chat summary: {r['session_id']}]\n{r['text']}")
-                    covered_sessions.add(r["session_id"])
+                    if r["score"] >= min_score:
+                        sections.append(f"[chat summary: {r['session_id']}]\n{r['text']}")
+                        covered_sessions.add(r["session_id"])
 
                 # Fill remaining slots with top message chunks from uncovered sessions
                 added = 0

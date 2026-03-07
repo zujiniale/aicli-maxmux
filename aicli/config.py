@@ -71,24 +71,27 @@ def _machine_key() -> bytes:
 
 def save_api_key(provider: str, key: str) -> None:
     """Encrypt and save an API key for a provider.
-    Uses OS keychain (keyring) when available, Fernet file as fallback."""
-    if _KEYRING_AVAILABLE:
-        try:
-            _keyring.set_password(_KEYRING_SERVICE, provider, key)
-            return
-        except Exception:
-            pass  # fall through to Fernet file
-
+    Always writes to the Fernet file as a guaranteed fallback.
+    Also writes to OS keychain (keyring) when available — but does NOT rely on
+    keyring alone, because it can become inaccessible in restricted process
+    contexts (e.g. under Tor / no D-Bus session bus)."""
+    # Always write to Fernet file first — this is the guaranteed fallback
+    # that works in all process contexts (Tor, headless, CI/CD, etc.)
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     fernet = Fernet(_machine_key())
-
-    # Load existing keys
     existing = _load_keys_raw()
     existing[provider] = key
-
     encrypted = fernet.encrypt(json.dumps(existing).encode())
     KEYS_FILE.write_bytes(encrypted)
     KEYS_FILE.chmod(0o600)
+
+    # Also write to OS keychain as a convenience (faster reads, OS-level protection)
+    # Non-fatal if it fails — Fernet file is already written above.
+    if _KEYRING_AVAILABLE:
+        try:
+            _keyring.set_password(_KEYRING_SERVICE, provider, key)
+        except Exception:
+            pass  # Fernet file is already the source of truth
 
 
 def _load_keys_raw() -> dict:
@@ -153,20 +156,25 @@ def get_config_value(key: str) -> str | None:
     Get any stored value by its exact key name.
     Checks (in order): env var → OS keychain (keyring) → encrypted keys file.
     Used by non-provider integrations like TAVILY_API_KEY, AICLI_PROXY, etc.
+
+    The Fernet file is always tried last and is the guaranteed fallback —
+    save_api_key() now writes to both keyring AND Fernet, so this always
+    finds the key even when keyring is unreachable (e.g. under Tor/no D-Bus).
     """
     # 1. Direct env var (e.g. TAVILY_API_KEY set in shell)
     env_val = os.environ.get(key)
     if env_val:
         return env_val
-    # 2. OS keychain — same store save_api_key() uses when keyring is available
+    # 2. OS keychain — fast path when D-Bus / SecretService is reachable.
+    # Can fail silently in restricted contexts (Tor, headless, no D-Bus session).
     if _KEYRING_AVAILABLE:
         try:
             kr_val = _keyring.get_password(_KEYRING_SERVICE, key)
             if kr_val:
                 return kr_val
         except Exception:
-            pass
-    # 3. Encrypted Fernet file fallback
+            pass  # fall through to Fernet file
+    # 3. Encrypted Fernet file — guaranteed fallback, always written by save_api_key()
     keys = _load_keys_raw()
     return keys.get(key)
 
