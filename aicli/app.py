@@ -52,7 +52,7 @@ from .handlers.agent import _agent
 
 @click.group(invoke_without_command=True)
 @click.pass_context
-@click.version_option(version="1.2.1", prog_name="aicli")
+@click.version_option(version="1.3.0", prog_name="aicli")
 def cli(ctx):
     """aicli — Free, private, async CLI AI. Run 'aicli ask \"your prompt\"' to start."""
     if ctx.invoked_subcommand is None:
@@ -79,9 +79,11 @@ def cli(ctx):
 @click.option("--cross-session", is_flag=True, help="Search RAG context across ALL sessions (requires --context)")
 @click.option("--context-debug", is_flag=True, help="Show which sources were injected as context (requires --context)")
 @click.option("--min-score", "min_score", default=0.40, type=float, help="Minimum similarity score for RAG context (default: 0.40)")
-def ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images, web, web_debug, web_verbose, cross_session, context_debug, min_score):
+@click.option("--run", "-r", is_flag=True, help="Execute generated code immediately (use with --code)")
+@click.option("--max-retries", "max_retries", default=3, type=int, help="Max self-correction retries when --run fails (default: 3)")
+def ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images, web, web_debug, web_verbose, cross_session, context_debug, min_score, run, max_retries):
     """Single-shot prompt. Pipe stdin or pass prompt as argument."""
-    asyncio.run(_ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images=images or None, web=web, web_debug=web_debug, web_verbose=web_verbose, cross_session=cross_session, context_debug=context_debug, min_score=min_score))
+    asyncio.run(_ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images=images or None, web=web, web_debug=web_debug, web_verbose=web_verbose, cross_session=cross_session, context_debug=context_debug, min_score=min_score, run=run, max_retries=max_retries))
 
 
 # ── chat ─────────────────────────────────────────────────────────────────────────
@@ -574,6 +576,84 @@ def session_summarize(session_name, model, print_only):
             print_error("Summarization failed or returned empty.")
 
     _asyncio.run(_run())
+
+
+
+
+# ── tui ──────────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--session", "-s", default=None, help="Open a specific session on launch")
+@click.option("--model", "-m", default=None, help="Override model")
+def tui(session, model):
+    """Full terminal UI — session list, chat, web toggle, context toggle.
+
+    \b
+    Keyboard shortcuts:
+      Ctrl+N    New session
+      Ctrl+D    Delete current session
+      Ctrl+E    Export session to markdown
+      Ctrl+W    Toggle web search
+      Ctrl+X    Toggle RAG context
+      Ctrl+S    Summarize current session
+      Ctrl+Q    Quit
+
+    Requires: pip install textual
+    """
+    try:
+        from .tui import run_tui
+    except ImportError:
+        print_error("textual not installed. Run: pip install textual")
+        return
+    run_tui(session=session, model=model)
+
+
+# ── plugin ───────────────────────────────────────────────────────────────────────
+
+@cli.group()
+def plugin():
+    """Plugin management. Plugins live in ~/.config/aicli/plugins/"""
+    pass
+
+
+@plugin.command("list")
+def plugin_list():
+    """List all installed plugins."""
+    from .tools.loader import list_plugins
+    list_plugins()
+
+
+@plugin.command("run")
+@click.argument("plugin_name")
+@click.argument("arg", default="")
+def plugin_run(plugin_name, arg):
+    """Run a plugin by name with an optional argument.
+
+    \b
+    Examples:
+      aicli plugin run calculator "2 + 2 * 10"
+      aicli plugin run my_tool "some input"
+    """
+    from .tools.loader import call_plugin, load_plugins
+    load_plugins()  # trigger load + error reporting
+    result = call_plugin(plugin_name, arg)
+    if result is None:
+        print_error(f"Plugin not found: {plugin_name}")
+        print_info("Run: aicli plugin list")
+    else:
+        print(result)
+
+
+@plugin.command("errors")
+def plugin_errors():
+    """Show any plugin load errors."""
+    from .tools.loader import get_load_errors
+    errors = get_load_errors()
+    if not errors:
+        print_success("No plugin load errors.")
+    else:
+        for err in errors:
+            print_error(err)
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────────

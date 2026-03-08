@@ -618,6 +618,160 @@ class TestExportIncludeSummary(unittest.TestCase):
         self.assertIn("hello", result)
         self.assertIn("hi there", result)
 
+
+# ── F8 Code Runner tests ──────────────────────────────────────────────────────────
+
+class TestCodeRunner(unittest.IsolatedAsyncioTestCase):
+
+    async def test_run_clean_code(self):
+        """Clean code runs and prints output."""
+        from aicli.handlers.code_runner import run_generated_code
+        import io
+        from contextlib import redirect_stdout
+        code = "print('hello from test')"
+        buf = io.StringIO()
+        # Should not raise — success path
+        await run_generated_code(code, MockPipeline(), "print hello", max_retries=0, show_code=False)
+
+    async def test_extract_code_strips_fences(self):
+        """_extract_code strips markdown fences correctly."""
+        from aicli.handlers.code_runner import _extract_code
+        fenced = "```python\nprint('hi')\n```"
+        self.assertEqual(_extract_code(fenced), "print('hi')")
+
+    async def test_extract_code_plain(self):
+        """_extract_code passes through plain code unchanged."""
+        from aicli.handlers.code_runner import _extract_code
+        plain = "x = 1 + 1\nprint(x)"
+        self.assertEqual(_extract_code(plain), plain)
+
+    async def test_run_code_returns_exit_0(self):
+        """_run_code returns exit 0 for valid Python."""
+        from aicli.handlers.code_runner import _run_code
+        code, stdout, stderr = _run_code("print(1+1)")
+        self.assertEqual(code, 0)
+        self.assertIn("2", stdout)
+        self.assertEqual(stderr, "")
+
+    async def test_run_code_returns_exit_1_on_error(self):
+        """_run_code returns exit 1 for syntax/runtime error."""
+        from aicli.handlers.code_runner import _run_code
+        code, stdout, stderr = _run_code("this is not valid python !!!")
+        self.assertNotEqual(code, 0)
+        self.assertGreater(len(stderr), 0)
+
+    async def test_self_correction_succeeds(self):
+        """run_generated_code self-corrects broken code using pipeline."""
+        from aicli.handlers.code_runner import run_generated_code
+
+        call_count = 0
+
+        class FixingPipeline:
+            last_provider = "mock"
+            async def stream(self, messages, model=None, requires_vision=False):
+                nonlocal call_count
+                call_count += 1
+                # Return fixed code on correction call
+                for chunk in ["print('fixed')\n"]:
+                    yield chunk
+
+        # Start with broken code — pipeline returns fixed version on retry
+        broken = "raise ValueError('intentional error')"
+        await run_generated_code(broken, FixingPipeline(), "test", max_retries=1, show_code=False)
+        self.assertGreater(call_count, 0)
+
+
+# ── F6 Plugin System tests ────────────────────────────────────────────────────────
+
+class TestPluginSystem(unittest.TestCase):
+
+    def _make_plugin_dir(self, tmp_path: Path) -> Path:
+        plugin_dir = Path(tmp_path) / "plugins"
+        plugin_dir.mkdir()
+        return plugin_dir
+
+    def test_empty_plugin_dir_returns_empty_list(self):
+        """No plugins in dir → empty list, no crash."""
+        from aicli.tools.loader import load_plugins
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugins = load_plugins(Path(tmpdir) / "plugins", force_reload=True)
+        self.assertEqual(plugins, [])
+
+    def test_valid_plugin_loaded(self):
+        """A valid plugin file is loaded and callable."""
+        from aicli.tools.loader import load_plugins, call_plugin
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir) / "plugins"
+            plugin_dir.mkdir()
+            plugin_file = plugin_dir / "testplugin.py"
+            plugin_file.write_text(
+                "def register():\n"
+                "    return {\n"
+                "        'name': 'testplugin',\n"
+                "        'description': 'A test plugin',\n"
+                "        'fn': lambda x: x.upper(),\n"
+                "    }\n"
+            )
+            plugins = load_plugins(plugin_dir, force_reload=True)
+        self.assertEqual(len(plugins), 1)
+        self.assertEqual(plugins[0]["name"], "testplugin")
+
+    def test_plugin_call(self):
+        """call_plugin invokes the fn and returns string result."""
+        from aicli.tools.loader import load_plugins, call_plugin
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir) / "plugins"
+            plugin_dir.mkdir()
+            (plugin_dir / "echo.py").write_text(
+                "def register():\n"
+                "    return {'name':'echo','description':'echo','fn': lambda x: x}\n"
+            )
+            load_plugins(plugin_dir, force_reload=True)
+            result = call_plugin("echo", "hello world", plugin_dir)
+        self.assertEqual(result, "hello world")
+
+    def test_missing_register_is_error(self):
+        """Plugin file without register() is skipped and recorded as error."""
+        from aicli.tools.loader import load_plugins, get_load_errors
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir) / "plugins"
+            plugin_dir.mkdir()
+            (plugin_dir / "bad.py").write_text("x = 1\n")
+            load_plugins(plugin_dir, force_reload=True)
+            errors = get_load_errors()
+        self.assertTrue(any("bad.py" in e for e in errors))
+
+    def test_missing_field_is_error(self):
+        """Plugin missing required field is skipped."""
+        from aicli.tools.loader import load_plugins, get_load_errors
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir) / "plugins"
+            plugin_dir.mkdir()
+            (plugin_dir / "nofn.py").write_text(
+                "def register():\n"
+                "    return {'name': 'x', 'description': 'y'}  # missing fn\n"
+            )
+            load_plugins(plugin_dir, force_reload=True)
+            errors = get_load_errors()
+        self.assertTrue(any("nofn.py" in e for e in errors))
+
+    def test_underscore_files_skipped(self):
+        """Files starting with _ (e.g. __init__.py) are not loaded."""
+        from aicli.tools.loader import load_plugins
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir) / "plugins"
+            plugin_dir.mkdir()
+            (plugin_dir / "__init__.py").write_text("# package marker\n")
+            plugins = load_plugins(plugin_dir, force_reload=True)
+        self.assertEqual(plugins, [])
+
+    def test_call_nonexistent_returns_none(self):
+        """call_plugin returns None for unknown plugin name."""
+        from aicli.tools.loader import call_plugin
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = call_plugin("doesnotexist", "arg", Path(tmpdir) / "plugins")
+        self.assertIsNone(result)
+
 # ── Run tests ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

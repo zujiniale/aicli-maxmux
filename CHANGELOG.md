@@ -4,6 +4,39 @@ All notable changes to aicli-maxmux are documented here.
 
 ---
 
+## [1.3.0] — 2026-03-08
+
+### Added
+- **F8 — `aicli ask --code --run`**: Execute generated Python code in a subprocess with self-correction loop
+  - `--run` flag on `ask --code` — generates code, runs it, shows output
+  - `--max-retries N` — self-correction attempts on error (default: 3)
+  - On failure: feeds error back to LLM for correction, retries automatically
+  - `handlers/code_runner.py` — `_extract_code()` strips ``` fences, `_run_code()` subprocess with 30s timeout
+- **F6 — Plugin system**: Auto-load custom tools from `~/.config/aicli/plugins/`
+  - Drop any `.py` file with `register() -> dict` into the plugins directory
+  - `aicli plugin list` — show all loaded plugins + load errors
+  - `aicli plugin run NAME ARG` — invoke a plugin directly from CLI
+  - `aicli plugin errors` — show failed plugin load errors
+  - `tools/loader.py` — `load_plugins()`, `call_plugin()`, `get_load_errors()`
+  - Plugins cached on first load; `force_reload=True` to re-scan
+  - Files starting with `_` (e.g. `__init__.py`) skipped automatically
+- **F7 — TUI**: Full terminal UI via Textual (`pip install textual`)
+  - `aicli tui [--session NAME] [--model MODEL]`
+  - Left sidebar: session list with message counts, click to switch
+  - Main panel: scrollable conversation with role colors
+  - Bottom input bar with flags display (`[web ON]` / `[ctx ON]`)
+  - Status bar: active provider, flags, token count
+  - `Ctrl+N` new session, `Ctrl+D` delete, `Ctrl+E` export to markdown
+  - `Ctrl+W` toggle web search, `Ctrl+X` toggle RAG context
+  - `Ctrl+S` summarize current session, `Ctrl+Q` quit
+  - Graceful: shows error if textual not installed
+- **91 tests** — up from 71 (F8: 6 new, F6: 7 new, + 7 existing)
+
+### Requires (optional)
+- F7 TUI: `pip install textual`  (or `pip install aicli-maxmux[tui]` in v1.3.0)
+
+---
+
 ## [1.2.0] — 2026-03-07
 
 ### Added

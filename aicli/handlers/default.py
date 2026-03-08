@@ -9,7 +9,7 @@ from ..tools.builtin.shell import shell_menu, execute_with_self_correction
 from ..image_utils import build_multimodal_content, is_multimodal
 
 
-async def _ask(prompt_parts, shell, code, describe, model, no_stream, json_output, dry_run, context=False, context_depth=1, images=None, web=False, web_debug=False, web_verbose=False, cross_session=False, context_debug=False, min_score=0.40):
+async def _ask(prompt_parts, shell, code, describe, model, no_stream, json_output, dry_run, context=False, context_depth=1, images=None, web=False, web_debug=False, web_verbose=False, cross_session=False, context_debug=False, min_score=0.40, run=False, max_retries=3):
     config = load_config()
 
     # Collect prompt from args and/or stdin
@@ -161,6 +161,22 @@ async def _ask(prompt_parts, shell, code, describe, model, no_stream, json_outpu
                     break
                 else:
                     break
+        elif code and run:
+            # F8: --code --run — collect silently, then pretty-print + execute
+            chunks = []
+            async for chunk in pipeline.stream(messages, model=model, requires_vision=requires_vision):
+                chunks.append(chunk)
+            generated_code = "".join(chunks).strip()
+            if generated_code:
+                from .code_runner import run_generated_code
+                await run_generated_code(
+                    generated_code,
+                    pipeline,
+                    original_prompt=prompt_text,
+                    model=model,
+                    max_retries=max_retries,
+                    show_code=True,  # pretty-print via rich before running
+                )
         else:
             # Default/code/describe/dry-run: stream directly
             gen = pipeline.stream(messages, model=model, requires_vision=requires_vision)
