@@ -4,7 +4,7 @@ All notable changes to aicli-maxmux are documented here.
 
 ---
 
-## [Unreleased] — v1.2.0-dev
+## [1.2.0] — 2026-03-07
 
 ### Added
 - F4: `--web` flag — 6-backend search chain, no API key required for free tier
@@ -43,6 +43,37 @@ All notable changes to aicli-maxmux are documented here.
 - `aicli config get` shows masked values only (first 8 + last 4 chars)
 
 ---
+
+### Added (v1.2.0 — Session 8)
+- **F5 — `session fork`**: Fork any session into a new branch
+  - `--from-message N` copies first N messages (1-indexed within session)
+  - `--name NAME` for custom fork name (auto-names `<source>-fork-1`, `-2`, etc.)
+  - Copies latest summary so fork starts with complete historical context
+- **F9 — `--cross-session`**: `aicli ask --context --cross-session` searches all past sessions globally
+- **F10 — `agent --image`**: Vision input for agent — images passed to plan generation AND observer steps
+- **`--context-debug`**: Show injected RAG source tags + 120-char snippets before answering
+- **`--min-score FLOAT`**: Override RAG relevance threshold per query (default: 0.40)
+- **`session rename OLD NEW`**: Rename session display name; UUID preserved; collision-checked
+- **`session summarize NAME`**: Generate/regenerate summary without resuming session
+  - `--print-only` to preview without saving
+  - `--model` to override provider
+- **`session list`**: Now shows full UUID at end of each row for fork/rename commands
+- **`aicli config migrate-keys`**: Migrate keys from OS keyring to Fernet backup file
+- **`aicli export --include-summary`**: Prepend latest summary to exported session
+- SearXNG quiet mode now shows failure count instead of silence
+
+### Fixed (v1.2.0 — Session 8)
+- **Fork 0 messages**: `id <= N` used global autoincrement — session messages have high IDs. Fixed: `LIMIT N ORDER BY id ASC`
+- **Fork loses context**: Fork now copies latest summary row from source session
+- **Irrelevant summaries in cross-session RAG**: `min_score` now applied to summaries (previously all summaries always included)
+- **`ImportError` in session summarize**: `from ..db import chat_db` fails in nested async inside Click. Fixed: absolute import
+- **`--cross-session` / `--context-debug` missing**: Stale `app.py`/`default.py` repatched from live files
+
+### Security (v1.2.0)
+- `pyproject.toml`: Added `readme = "README.md"` — fixes `twine check` warnings
+- `.gitignore`: Added `*.png` to prevent accidental media commits
+- `config migrate-keys`: Ensures Fernet backup populated for all keys stored pre-1.2.0
+
 
 ## [1.1.0] — 2026-01-xx
 

@@ -7,7 +7,7 @@ from ..db.chat_db import get_connection, list_sessions, load_messages, load_late
 from ..printer import print_error, print_info
 
 
-async def _export(session_name: str, fmt: str, output: str | None):
+async def _export(session_name: str, fmt: str, output: str | None, include_summary: bool = False):
     conn = get_connection()
     sessions = list_sessions(conn)
     matching = [s for s in sessions if s["name"] == session_name or s["id"] == session_name]
@@ -25,9 +25,9 @@ async def _export(session_name: str, fmt: str, output: str | None):
         return
 
     if fmt == "json":
-        content = _to_json(session_name, session_id, messages, summary)
+        content = _to_json(session_name, session_id, messages, summary, include_summary=include_summary)
     else:
-        content = _to_markdown(session_name, session_id, messages, summary)
+        content = _to_markdown(session_name, session_id, messages, summary, include_summary=include_summary)
 
     if output:
         with open(output, "w") as f:
@@ -37,14 +37,14 @@ async def _export(session_name: str, fmt: str, output: str | None):
         sys.stdout.write(content)
 
 
-def _to_markdown(session_name, session_id, messages, summary) -> str:
+def _to_markdown(session_name, session_id, messages, summary, include_summary: bool = False) -> str:
     lines = []
     lines.append(f"# aicli session: {session_name}")
     lines.append(f"\n**Session ID:** `{session_id}`")
     lines.append(f"**Exported:** {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     lines.append(f"**Messages:** {len(messages)}")
 
-    if summary:
+    if include_summary and summary:
         lines.append(f"\n---\n\n## Summary\n\n{summary}")
 
     lines.append("\n---\n\n## Conversation\n")
@@ -67,13 +67,13 @@ def _to_markdown(session_name, session_id, messages, summary) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _to_json(session_name, session_id, messages, summary) -> str:
+def _to_json(session_name, session_id, messages, summary, include_summary: bool = False) -> str:
     data = {
         "session_name": session_name,
         "session_id": session_id,
         "exported_at": datetime.now().isoformat(),
         "message_count": len(messages),
-        "summary": summary,
+        "summary": summary if include_summary else None,
         "messages": [
             {
                 "role": msg["role"],

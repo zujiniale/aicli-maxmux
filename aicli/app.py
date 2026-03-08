@@ -52,7 +52,7 @@ from .handlers.agent import _agent
 
 @click.group(invoke_without_command=True)
 @click.pass_context
-@click.version_option(version="1.2.0", prog_name="aicli")
+@click.version_option(version="1.2.1", prog_name="aicli")
 def cli(ctx):
     """aicli — Free, private, async CLI AI. Run 'aicli ask \"your prompt\"' to start."""
     if ctx.invoked_subcommand is None:
@@ -168,6 +168,32 @@ def config_get(key):
         print_success(f"{key} = {masked}")
     else:
         print_error(f"No value found for: {key}")
+
+
+
+@config.command("migrate-keys")
+def config_migrate_keys():
+    """Migrate keys from OS keyring into the Fernet encrypted backup file.
+
+    \b
+    Run this once after upgrading from pre-1.2.0 to ensure all keys work
+    under Tor, Docker, SSH, or any environment where the OS keychain
+    (D-Bus / SecretService) may be inaccessible.
+
+    Examples:
+      aicli config migrate-keys
+    """
+    from .config import migrate_all_keys
+    print_info("Reading keys from OS keyring...")
+    migrated = migrate_all_keys()
+    if migrated:
+        for k in migrated:
+            print_success(f"Migrated: {k}")
+        print_success(f"\n{len(migrated)} key(s) written to Fernet backup file.")
+        print_info("Keys now work in all process contexts (Tor, headless, Docker).")
+    else:
+        print_info("No keys found in OS keyring to migrate.")
+        print_info("If keys are set, use: aicli config set KEY value")
 
 
 @config.command("show")
@@ -320,9 +346,17 @@ def index(path, include_chat):
 @click.argument("session_name")
 @click.option("--format", "fmt", default="markdown", type=click.Choice(["markdown", "json"]), help="Output format (default: markdown)")
 @click.option("--output", "-o", default=None, help="Write to file instead of stdout")
-def export(session_name, fmt, output):
-    """Export a session to markdown or JSON. Pipe with: aicli export mysession > out.md"""
-    asyncio.run(_export(session_name, fmt, output))
+@click.option("--include-summary", "include_summary", is_flag=True, help="Prepend latest auto-summary to export")
+def export(session_name, fmt, output, include_summary):
+    """Export a session to markdown or JSON. Pipe with: aicli export mysession > out.md
+
+    \b
+    Examples:
+      aicli export myproject > session.md
+      aicli export myproject --include-summary > full.md
+      aicli export myproject --format json > session.json
+    """
+    asyncio.run(_export(session_name, fmt, output, include_summary=include_summary))
 
 
 # ── agent ────────────────────────────────────────────────────────────────────────

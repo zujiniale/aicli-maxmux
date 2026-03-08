@@ -179,6 +179,31 @@ def get_config_value(key: str) -> str | None:
     return keys.get(key)
 
 
+
+def migrate_all_keys() -> list[str]:
+    """
+    Read all known keys from OS keychain and write them to the Fernet file.
+    Use this after upgrading from pre-1.2.0 to ensure keys work under Tor/headless.
+    Returns list of key names that were successfully migrated.
+    """
+    known_keys = [
+        "GROQ_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY",
+        "MISTRAL_API_KEY", "TAVILY_API_KEY", "AICLI_PROXY",
+        "BRAVE_SEARCH_API_KEY",
+    ]
+    migrated = []
+    if not _KEYRING_AVAILABLE:
+        return migrated
+    for k in known_keys:
+        try:
+            val = _keyring.get_password(_KEYRING_SERVICE, k)
+            if val:
+                save_api_key(k, val)  # Fernet first, keyring second
+                migrated.append(k)
+        except Exception:
+            pass
+    return migrated
+
 def _key_url(provider: str) -> str:
     urls = {
         "groq": "https://console.groq.com/keys",

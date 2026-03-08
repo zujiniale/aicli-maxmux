@@ -436,6 +436,188 @@ class TestImageUtils(unittest.TestCase):
         self.assertEqual(_unpack_content("old plain text"), "old plain text")
 
 
+
+# ── Fork session tests (S8) ───────────────────────────────────────────────────────
+
+class TestForkSession(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        self.conn = get_connection(Path(self.tmp.name))
+
+    def tearDown(self):
+        self.conn.close()
+        os.unlink(self.tmp.name)
+
+    def test_fork_full_copy(self):
+        """fork_session with no up_to copies ALL messages."""
+        from aicli.db.chat_db import fork_session
+        for i in range(5):
+            save_message(self.conn, "src", "user" if i % 2 == 0 else "assistant", f"msg {i}")
+        new_id = fork_session(self.conn, "src", "fork-full")
+        msgs = load_messages(self.conn, new_id)
+        self.assertEqual(len(msgs), 5)
+
+    def test_fork_limit_n_positional(self):
+        """fork_session --from-message N uses LIMIT N, not id <= N (global autoincrement fix)."""
+        from aicli.db.chat_db import fork_session
+        # Insert 10 messages — their IDs will be high numbers (global autoincrement)
+        for i in range(10):
+            save_message(self.conn, "src", "user", f"msg {i}")
+        # Fork first 3 — should work regardless of what the actual IDs are
+        new_id = fork_session(self.conn, "src", "fork-3", up_to_message_id=3)
+        msgs = load_messages(self.conn, new_id)
+        self.assertEqual(len(msgs), 3)
+        self.assertEqual(msgs[0]["content"], "msg 0")
+        self.assertEqual(msgs[2]["content"], "msg 2")
+
+    def test_fork_copies_latest_summary(self):
+        """fork_session copies the latest summary so fork starts with full context."""
+        from aicli.db.chat_db import fork_session
+        save_message(self.conn, "src", "user", "hello")
+        save_summary(self.conn, "src", "Old summary", 1, 1)
+        save_summary(self.conn, "src", "Latest summary", 1, 1)  # two summaries — only latest copied
+        new_id = fork_session(self.conn, "src", "fork-summary")
+        summary = load_latest_summary(self.conn, new_id)
+        self.assertEqual(summary, "Latest summary")
+
+    def test_fork_no_summary_is_fine(self):
+        """fork_session on session with no summaries does not crash."""
+        from aicli.db.chat_db import fork_session
+        save_message(self.conn, "src", "user", "hello")
+        new_id = fork_session(self.conn, "src", "fork-nosummary")
+        summary = load_latest_summary(self.conn, new_id)
+        self.assertIsNone(summary)
+
+    def test_fork_source_not_found_raises(self):
+        """fork_session raises ValueError for nonexistent source session."""
+        from aicli.db.chat_db import fork_session
+        with self.assertRaises(ValueError) as ctx:
+            fork_session(self.conn, "nonexistent-uuid", "fork-bad")
+        self.assertIn("not found", str(ctx.exception))
+
+    def test_fork_does_not_modify_source(self):
+        """Forking must not change the source session messages or summaries."""
+        from aicli.db.chat_db import fork_session
+        for i in range(5):
+            save_message(self.conn, "src", "user", f"msg {i}")
+        save_summary(self.conn, "src", "Source summary", 1, 5)
+        fork_session(self.conn, "src", "fork-isolated")
+        # Source must be unchanged
+        src_msgs = load_messages(self.conn, "src")
+        self.assertEqual(len(src_msgs), 5)
+        src_summary = load_latest_summary(self.conn, "src")
+        self.assertEqual(src_summary, "Source summary")
+
+    def test_fork_from_message_zero_returns_empty(self):
+        """up_to_message_id=0 should copy 0 messages (LIMIT 0)."""
+        from aicli.db.chat_db import fork_session
+        for i in range(5):
+            save_message(self.conn, "src", "user", f"msg {i}")
+        new_id = fork_session(self.conn, "src", "fork-zero", up_to_message_id=0)
+        msgs = load_messages(self.conn, new_id)
+        self.assertEqual(len(msgs), 0)
+
+
+# ── Config migrate-keys tests (S8) ───────────────────────────────────────────────
+
+class TestMigrateKeys(unittest.TestCase):
+
+    def test_migrate_keys_returns_list(self):
+        """migrate_all_keys() always returns a list (even with no keyring)."""
+        from aicli.config import migrate_all_keys
+        with patch("aicli.config._KEYRING_AVAILABLE", False):
+            result = migrate_all_keys()
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 0)
+
+    def test_migrate_keys_writes_fernet(self):
+        """Keys read from keyring are written to Fernet file."""
+        from aicli.config import migrate_all_keys
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("aicli.config.CONFIG_DIR", Path(tmpdir)):
+                with patch("aicli.config.KEYS_FILE", Path(tmpdir) / "keys.enc"):
+                    with patch("aicli.config._KEYRING_AVAILABLE", True):
+                        # Mock keyring to return a value for GROQ_API_KEY
+                        import aicli.config as cfg_mod
+                        def mock_get_password(service, key):
+                            if key == "GROQ_API_KEY":
+                                return "gsk-test-migrate-key"
+                            return None
+                        with patch.object(cfg_mod._keyring, "get_password", mock_get_password):
+                            migrated = migrate_all_keys()
+                        self.assertIn("GROQ_API_KEY", migrated)
+                        # Verify it's now in the Fernet file
+                        from aicli.config import _load_keys_raw
+                        keys = _load_keys_raw()
+                        self.assertEqual(keys.get("GROQ_API_KEY"), "gsk-test-migrate-key")
+
+
+# ── Export --include-summary tests (S8) ──────────────────────────────────────────
+
+class TestExportIncludeSummary(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        self.conn = get_connection(Path(self.tmp.name))
+
+    def tearDown(self):
+        self.conn.close()
+        os.unlink(self.tmp.name)
+
+    def test_export_markdown_without_summary_by_default(self):
+        """_to_markdown does not include summary section by default."""
+        from aicli.handlers.export import _to_markdown
+        messages = [{"role": "user", "content": "hello", "timestamp": ""}]
+        result = _to_markdown("test", "uuid", messages, "This is the summary")
+        self.assertNotIn("## Summary", result)
+        self.assertNotIn("This is the summary", result)
+
+    def test_export_markdown_with_summary_flag(self):
+        """_to_markdown includes summary section when include_summary=True."""
+        from aicli.handlers.export import _to_markdown
+        messages = [{"role": "user", "content": "hello", "timestamp": ""}]
+        result = _to_markdown("test", "uuid", messages, "This is the summary", include_summary=True)
+        self.assertIn("## Summary", result)
+        self.assertIn("This is the summary", result)
+
+    def test_export_markdown_no_summary_no_section(self):
+        """_to_markdown with include_summary=True but no summary — no crash, no section."""
+        from aicli.handlers.export import _to_markdown
+        messages = [{"role": "user", "content": "hello", "timestamp": ""}]
+        result = _to_markdown("test", "uuid", messages, None, include_summary=True)
+        self.assertNotIn("## Summary", result)
+
+    def test_export_json_summary_null_by_default(self):
+        """_to_json summary field is None when include_summary=False."""
+        from aicli.handlers.export import _to_json
+        import json
+        messages = [{"role": "user", "content": "hello", "timestamp": ""}]
+        result = json.loads(_to_json("test", "uuid", messages, "A summary"))
+        self.assertIsNone(result["summary"])
+
+    def test_export_json_summary_included_with_flag(self):
+        """_to_json summary field populated when include_summary=True."""
+        from aicli.handlers.export import _to_json
+        import json
+        messages = [{"role": "user", "content": "hello", "timestamp": ""}]
+        result = json.loads(_to_json("test", "uuid", messages, "A summary", include_summary=True))
+        self.assertEqual(result["summary"], "A summary")
+
+    def test_export_markdown_conversation_always_present(self):
+        """Conversation section always present regardless of summary flag."""
+        from aicli.handlers.export import _to_markdown
+        messages = [
+            {"role": "user", "content": "hello", "timestamp": ""},
+            {"role": "assistant", "content": "hi there", "timestamp": ""},
+        ]
+        result = _to_markdown("test", "uuid", messages, "Summary", include_summary=False)
+        self.assertIn("## Conversation", result)
+        self.assertIn("hello", result)
+        self.assertIn("hi there", result)
+
 # ── Run tests ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

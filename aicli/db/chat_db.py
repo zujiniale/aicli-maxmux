@@ -253,17 +253,19 @@ def fork_session(
             VALUES (?, ?, ?, ?, ?)
         """, (new_id, row["role"], row["content"], row["token_count"], row["created_at"]))
 
-    # Copy the latest summary so the fork starts with full context intact
-    summary_row = conn.execute("""
-        SELECT summary, covers_from, covers_to, created_at FROM summaries
+    # Copy the latest summary so the fork starts with full historical context.
+    # Only copy the most recent summary — it covers the full history up to that point.
+    latest_summary = conn.execute("""
+        SELECT summary, covers_from, covers_to FROM summaries
         WHERE session_id = ?
-        ORDER BY id DESC LIMIT 1
+        ORDER BY id DESC
+        LIMIT 1
     """, (source_session_id,)).fetchone()
-    if summary_row:
+    if latest_summary:
         conn.execute("""
             INSERT INTO summaries (session_id, summary, covers_from, covers_to, created_at)
             VALUES (?, ?, ?, ?, ?)
-        """, (new_id, summary_row["summary"], summary_row["covers_from"], summary_row["covers_to"], summary_row["created_at"]))
+        """, (new_id, latest_summary["summary"], latest_summary["covers_from"], latest_summary["covers_to"], now))
 
     conn.commit()
     return new_id
