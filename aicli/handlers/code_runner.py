@@ -7,13 +7,28 @@ max_retries times).
 
 Usage (internal):
     from .code_runner import run_generated_code
-    await run_generated_code(code, pipeline, original_prompt, model, max_retries=3)
+    await run_generated_code(code, pipeline, original_prompt, model, max_retries=3,
+                             language="python", timeout=30)
+
+Supported languages: python, bash, node, ruby
 """
+import asyncio
 import subprocess
 import sys
 import textwrap
 
 from ..printer import print_error, print_info, print_success, print_warning
+
+# ── Language runners ──────────────────────────────────────────────────────────
+
+RUNNERS: dict[str, list[str]] = {
+    "python": [sys.executable, "-c"],
+    "bash":   ["bash",         "-c"],
+    "node":   ["node",         "-e"],
+    "ruby":   ["ruby",         "-e"],
+}
+
+_DEFAULT_TIMEOUT = 30
 
 
 def _print_code(code: str, label: str = "Code:") -> None:
@@ -37,9 +52,6 @@ Return ONLY the corrected Python code — no explanation, no markdown fences, no
 Output raw Python only. The code must be complete and runnable as-is.
 """
 
-_TIMEOUT_SECONDS = 30
-
-
 def _extract_code(text: str) -> str:
     """Strip markdown fences from LLM output to get raw Python."""
     text = text.strip()
@@ -54,18 +66,21 @@ def _extract_code(text: str) -> str:
     return text
 
 
-def _run_code(code: str) -> tuple[int, str, str]:
-    """Run Python code in a subprocess. Returns (exit_code, stdout, stderr)."""
+def _run_code(code: str, language: str = "python", timeout: int = _DEFAULT_TIMEOUT) -> tuple[int, str, str]:
+    """Run code in a subprocess for the given language. Returns (exit_code, stdout, stderr)."""
+    runner = RUNNERS.get(language, RUNNERS["python"])
     try:
         result = subprocess.run(
-            [sys.executable, "-c", code],
+            runner + [code],
             capture_output=True,
             text=True,
-            timeout=_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
         return result.returncode, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
-        return 1, "", f"Timeout: code took longer than {_TIMEOUT_SECONDS}s"
+        return 1, "", f"Timeout: code took longer than {timeout}s"
+    except FileNotFoundError:
+        return 1, "", f"Runtime not found: '{runner[0]}' — is {language} installed?"
     except Exception as e:
         return 1, "", str(e)
 
@@ -77,34 +92,62 @@ async def run_generated_code(
     model: str | None = None,
     max_retries: int = 3,
     show_code: bool = True,
+    language: str = "python",
+    timeout: int = _DEFAULT_TIMEOUT,
 ) -> None:
     """
-    Execute Python code, self-correct on errors, print final output.
+    Execute code, self-correct on errors, stream final output live.
 
     Args:
-        code:            The Python code string to run (may have ``` fences).
+        code:            The code string to run (may have ``` fences).
         pipeline:        ProviderPipeline instance for correction calls.
         original_prompt: The original user prompt (used in correction context).
         model:           Optional model override for correction calls.
         max_retries:     Max self-correction attempts (default: 3).
         show_code:       Print the code before running (default: True).
+        language:        Runtime to use — python, bash, node, ruby (default: python).
+        timeout:         Subprocess timeout in seconds (default: 30).
     """
     from ..providers.pipeline import ProviderExhaustedError
 
     code = _extract_code(code)
+    lang_label = f" [{language}]" if language != "python" else ""
 
     for attempt in range(max_retries + 1):
         if show_code or attempt > 0:
-            label = "Code:" if attempt == 0 else f"Corrected code (attempt {attempt}):"
+            label = f"Code{lang_label}:" if attempt == 0 else f"Corrected code (attempt {attempt}):"
             _print_code(code, label)
 
         print_info("Running..." if attempt == 0 else f"Retrying ({attempt}/{max_retries})...")
-        exit_code, stdout, stderr = _run_code(code)
+
+        # ── Stream stdout live using asyncio subprocess ───────────────────────
+        runner = RUNNERS.get(language, RUNNERS["python"])
+        try:
+            async def _run_and_stream() -> tuple[int, str]:
+                proc = await asyncio.create_subprocess_exec(
+                    *runner, code,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                assert proc.stdout is not None
+                async for raw_line in proc.stdout:
+                    line = raw_line.decode(errors="replace")
+                    print(line, end="", flush=True)
+                stdout_out, stderr_bytes = await proc.communicate()
+                stderr = stderr_bytes.decode(errors="replace") if stderr_bytes else ""
+                return proc.returncode or 0, stderr
+
+            exit_code, stderr = await asyncio.wait_for(_run_and_stream(), timeout=timeout)
+        except asyncio.TimeoutError:
+            exit_code, stderr = 1, f"Timeout: code took longer than {timeout}s"
+        except FileNotFoundError:
+            exit_code, stderr = 1, f"Runtime not found: '{runner[0]}' — is {language} installed?"
+        except Exception as e:
+            exit_code, stderr = 1, str(e)
 
         if exit_code == 0:
-            if stdout.strip():
-                print(stdout.rstrip())
-            print_success(f"Done.{' (' + str(attempt) + ' correction(s))' if attempt > 0 else ''}")
+            correction_note = f" ({attempt} correction(s))" if attempt > 0 else ""
+            print_success(f"Done.{correction_note}")
             return
 
         # Failed — show error
@@ -122,9 +165,9 @@ async def run_generated_code(
             {"role": "system", "content": _CORRECTION_SYSTEM},
             {"role": "user", "content": (
                 f"Original task: {original_prompt}\n\n"
-                f"Code that failed:\n```python\n{code}\n```\n\n"
+                f"Code that failed:\n```{language}\n{code}\n```\n\n"
                 f"Error output:\n{stderr.strip()[:1500]}\n\n"
-                f"Return only the corrected Python code."
+                f"Return only the corrected {language} code."
             )},
         ]
 

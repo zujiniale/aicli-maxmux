@@ -3,7 +3,7 @@
 app.py — aicli: A free, private, async CLI AI tool.
 
 Commands:
-  ask     — Single-shot prompt (default, --shell, --code, --describe)
+  ask     — Single-shot prompt (default, --shell, --code, --describe, --run)
   chat    — Persistent session with memory
   repl    — Interactive REPL loop
   export  — Export session to markdown or JSON
@@ -11,11 +11,17 @@ Commands:
   config  — Configuration management (set-key, set, get, show, edit)
   provider — Provider management (status, test)
   session — Session management (list, show, delete, fork, fork --from-message N)
+  tui     — Full terminal UI (session list, chat, themes, graph export)
+  graph   — Interactive D3 session graph viewer (local HTTP server, auto-load)
+  plugin  — Plugin management (list, run, errors, install, doc)
 
 Usage:
   aicli ask "list python files in current dir"
   aicli ask --shell "find all large files"
   aicli ask --code "write a merge sort in Python"
+  aicli ask --code --run "write a fibonacci function"
+  aicli ask --code --run --language bash "list all git branches"
+  aicli ask --code --run --language node "fetch and print a URL"
   aicli ask --web "latest Python 3.13 features"
   aicli chat --session myproject
   aicli repl
@@ -29,6 +35,13 @@ Usage:
   aicli session fork myproject --from-message 12
   aicli config set TAVILY_API_KEY tvly-xxxx
   aicli config get TAVILY_API_KEY
+  aicli tui
+  aicli tui --session myproject
+  aicli graph
+  aicli graph --port 8080 --no-browser
+  aicli plugin list
+  aicli plugin install https://example.com/my_tool.py
+  aicli plugin doc my_tool
 """
 
 import asyncio
@@ -52,7 +65,7 @@ from .handlers.agent import _agent
 
 @click.group(invoke_without_command=True)
 @click.pass_context
-@click.version_option(version="1.3.0", prog_name="aicli")
+@click.version_option(version="1.4.0", prog_name="aicli")
 def cli(ctx):
     """aicli — Free, private, async CLI AI. Run 'aicli ask \"your prompt\"' to start."""
     if ctx.invoked_subcommand is None:
@@ -81,9 +94,11 @@ def cli(ctx):
 @click.option("--min-score", "min_score", default=0.40, type=float, help="Minimum similarity score for RAG context (default: 0.40)")
 @click.option("--run", "-r", is_flag=True, help="Execute generated code immediately (use with --code)")
 @click.option("--max-retries", "max_retries", default=3, type=int, help="Max self-correction retries when --run fails (default: 3)")
-def ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images, web, web_debug, web_verbose, cross_session, context_debug, min_score, run, max_retries):
+@click.option("--language", "language", default="python", type=click.Choice(["python", "bash", "node", "ruby"]), help="Runtime for --run (default: python)")
+@click.option("--timeout", "timeout", default=30, type=int, help="Subprocess timeout in seconds for --run (default: 30)")
+def ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images, web, web_debug, web_verbose, cross_session, context_debug, min_score, run, max_retries, language, timeout):
     """Single-shot prompt. Pipe stdin or pass prompt as argument."""
-    asyncio.run(_ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images=images or None, web=web, web_debug=web_debug, web_verbose=web_verbose, cross_session=cross_session, context_debug=context_debug, min_score=min_score, run=run, max_retries=max_retries))
+    asyncio.run(_ask(prompt, shell, code, describe, model, no_stream, json_output, dry_run, context, context_depth, images=images or None, web=web, web_debug=web_debug, web_verbose=web_verbose, cross_session=cross_session, context_debug=context_debug, min_score=min_score, run=run, max_retries=max_retries, language=language, timeout=timeout))
 
 
 # ── chat ─────────────────────────────────────────────────────────────────────────
@@ -585,7 +600,8 @@ def session_summarize(session_name, model, print_only):
 @cli.command()
 @click.option("--session", "-s", default=None, help="Open a specific session on launch")
 @click.option("--model", "-m", default=None, help="Override model")
-def tui(session, model):
+@click.option("--no-history", "no_history", is_flag=True, help="Don't load past messages on open")
+def tui(session, model, no_history):
     """Full terminal UI — session list, chat, web toggle, context toggle.
 
     \b
@@ -605,7 +621,7 @@ def tui(session, model):
     except ImportError:
         print_error("textual not installed. Run: pip install textual")
         return
-    run_tui(session=session, model=model)
+    run_tui(session=session, model=model, no_history=no_history)
 
 
 # ── plugin ───────────────────────────────────────────────────────────────────────
@@ -654,6 +670,94 @@ def plugin_errors():
     else:
         for err in errors:
             print_error(err)
+
+
+@plugin.command("install")
+@click.argument("url")
+@click.option("--name", default=None, help="Override filename (without .py extension)")
+def plugin_install(url, name):
+    """Download and install a plugin from a URL.
+
+    \b
+    Example:
+      aicli plugin install https://example.com/my_tool.py
+      aicli plugin install https://example.com/tool.py --name my_tool
+    """
+    import urllib.request
+    from .tools.loader import _plugins_dir
+    plugins_dir = _plugins_dir()
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    filename = (name or url.rstrip("/").split("/")[-1].removesuffix(".py")) + ".py"
+    dest = plugins_dir / filename
+    try:
+        print_info(f"Downloading {url} → {dest}")
+        urllib.request.urlretrieve(url, dest)
+        print_success(f"Installed: {filename}")
+        print_info("Run: aicli plugin list")
+    except Exception as e:
+        print_error(f"Install failed: {e}")
+
+
+@plugin.command("doc")
+@click.argument("plugin_name")
+def plugin_doc(plugin_name):
+    """Show full description and source path for a plugin.
+
+    \b
+    Example:
+      aicli plugin doc calculator
+    """
+    from .tools.loader import get_plugin_tools
+    for tool in get_plugin_tools():
+        if tool["name"] == plugin_name:
+            print(f"\n\033[1m{tool['name']}\033[0m")
+            ver    = f"  version: {tool['version']}" if tool.get("version") else ""
+            author = f"  author:  {tool['author']}" if tool.get("author") else ""
+            if ver:
+                print(ver)
+            if author:
+                print(author)
+            print(f"\n  {tool.get('description', '(no description)')}\n")
+            print(f"\033[90m  source: {tool.get('_source', 'unknown')}\033[0m\n")
+            return
+    print_error(f"Plugin not found: {plugin_name}")
+    print_info("Run: aicli plugin list")
+
+
+# ── graph ────────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--port", "-p", default=7337, help="Port to serve on (default: 7337)")
+@click.option("--no-browser", is_flag=True, help="Don't open browser automatically")
+def graph(port, no_browser):
+    """Interactive session graph viewer — auto-loads all exported sessions.
+
+    \b
+    Starts a local server at http://localhost:7337 and opens your browser.
+    Sessions exported via F4 in the TUI appear as nodes automatically.
+    Create links between sessions, add notes, and save the graph.
+
+    \b
+    Browser shortcuts:
+      L          Toggle link mode (click two nodes to link)
+      R          Reload sessions from server
+      Esc        Cancel / close panel
+      Click      Select node / open panel
+      Dbl-click  Edit node name and notes
+      Hover link + Click  Delete link
+
+    \b
+    Examples:
+      aicli graph
+      aicli graph --port 8080
+      aicli graph --no-browser
+    """
+    try:
+        from .graph_server import run_graph_server
+    except ImportError as e:
+        print_error(f"Graph server error: {e}")
+        return
+    run_graph_server(port=port, open_browser=not no_browser)
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────────

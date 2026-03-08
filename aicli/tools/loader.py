@@ -23,6 +23,7 @@ Example plugin (~/.config/aicli/plugins/calculator.py):
         }
 """
 
+import asyncio
 import importlib.util
 import sys
 from pathlib import Path
@@ -88,6 +89,23 @@ def _load_plugin_file(path: Path) -> dict | None:
         raise TypeError(f"tool['fn'] must be callable")
 
     tool["_source"] = str(path)
+
+    # Warn (don't error) if optional version field is absent
+    if "version" not in tool:
+        import warnings
+        warnings.warn(
+            f"[plugin] {path.name}: register() dict missing optional field 'version'",
+            stacklevel=2,
+        )
+
+    # Wrap async fn so call_plugin can call it synchronously
+    if asyncio.iscoroutinefunction(tool["fn"]):
+        _orig_fn = tool["fn"]
+        def _sync_wrapper(arg, _fn=_orig_fn):
+            import asyncio as _asyncio
+            return _asyncio.run(_fn(arg))
+        tool["fn"] = _sync_wrapper
+
     return tool
 
 

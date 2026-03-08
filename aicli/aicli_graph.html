@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aicli — Session Graph</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg:       #1a1b26;
+    --bg-alt:   #16213e;
+    --bg-panel: #1e2030;
+    --border:   #2a2b3d;
+    --accent:   #7aa2f7;
+    --green:    #9ece6a;
+    --amber:    #e0af68;
+    --red:      #f7768e;
+    --text:     #c0caf5;
+    --muted:    #565f89;
+    --node-r:   22;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 20px;
+    background: #0f1117;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  header h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 15px; font-weight: 800;
+    color: var(--accent); letter-spacing: 0.05em;
+  }
+  header .hint {
+    font-size: 11px; color: var(--muted);
+    margin-left: auto;
+  }
+  header button {
+    background: var(--bg-panel); border: 1px solid var(--border);
+    color: var(--text); font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; padding: 4px 10px; cursor: pointer;
+    border-radius: 3px; transition: border-color 0.15s;
+  }
+  header button:hover { border-color: var(--accent); color: var(--accent); }
+  header button.active { border-color: var(--green); color: var(--green); }
+
+  #canvas { flex: 1; position: relative; }
+  svg { width: 100%; height: 100%; }
+
+  /* Nodes */
+  .node circle {
+    stroke-width: 2; cursor: pointer;
+    transition: r 0.15s;
+    filter: drop-shadow(0 0 6px currentColor);
+  }
+  .node circle.session  { fill: #1e2030; stroke: var(--accent); }
+  .node circle.selected { stroke: var(--amber); stroke-width: 3; }
+  .node circle.linking  { stroke: var(--green); stroke-width: 3; animation: pulse 1s infinite; }
+  .node text {
+    fill: var(--text); font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    pointer-events: none; text-anchor: middle;
+    dominant-baseline: central;
+  }
+  .node .sublabel {
+    fill: var(--muted); font-size: 9px;
+  }
+
+  @keyframes pulse {
+    0%,100% { stroke-opacity: 1; }
+    50% { stroke-opacity: 0.4; }
+  }
+
+  /* Links */
+  .link {
+    stroke: var(--muted); stroke-opacity: 0.5;
+    stroke-width: 1.5; fill: none;
+    cursor: pointer; transition: stroke 0.15s;
+  }
+  .link:hover { stroke: var(--red); stroke-opacity: 1; }
+  .link.highlight { stroke: var(--accent); stroke-opacity: 0.9; }
+  .link-label {
+    fill: var(--muted); font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    pointer-events: none;
+  }
+
+  /* Panel */
+  #panel {
+    position: absolute; right: 0; top: 0; bottom: 0;
+    width: 280px; background: var(--bg-panel);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.2s ease;
+    z-index: 5;
+  }
+  #panel.open { transform: translateX(0); }
+  #panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px; font-weight: 700; color: var(--accent);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  #panel-header button {
+    background: none; border: none; color: var(--muted);
+    cursor: pointer; font-size: 14px; padding: 2px 6px;
+  }
+  #panel-header button:hover { color: var(--red); }
+  #panel-body { padding: 14px 16px; flex: 1; overflow-y: auto; }
+  #panel-body h3 { font-size: 12px; color: var(--amber); margin-bottom: 8px; font-family: 'Syne', sans-serif; }
+  #panel-body .field { margin-bottom: 10px; }
+  #panel-body label { font-size: 10px; color: var(--muted); display: block; margin-bottom: 3px; }
+  #panel-body input, #panel-body textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; padding: 6px 8px; border-radius: 3px;
+    outline: none; transition: border-color 0.15s;
+  }
+  #panel-body input:focus, #panel-body textarea:focus { border-color: var(--accent); }
+  #panel-body textarea { resize: vertical; min-height: 60px; }
+  #panel-body .links-list { list-style: none; }
+  #panel-body .links-list li {
+    padding: 5px 8px; margin-bottom: 4px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 3px; font-size: 11px;
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer; transition: border-color 0.15s;
+  }
+  #panel-body .links-list li:hover { border-color: var(--accent); }
+  #panel-body .links-list li .del {
+    color: var(--muted); cursor: pointer; font-size: 13px; padding: 0 4px;
+  }
+  #panel-body .links-list li .del:hover { color: var(--red); }
+  .btn-row { display: flex; gap: 8px; margin-top: 10px; }
+  .btn-row button {
+    flex: 1; padding: 7px; font-size: 11px; cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; border-radius: 3px;
+    border: 1px solid var(--border); background: var(--bg);
+    color: var(--text); transition: all 0.15s;
+  }
+  .btn-row button:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-row button.danger:hover { border-color: var(--red); color: var(--red); }
+  .btn-row button.primary { border-color: var(--green); color: var(--green); }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--bg-panel); border: 1px solid var(--accent);
+    color: var(--text); font-size: 12px; padding: 8px 18px;
+    border-radius: 4px; opacity: 0; pointer-events: none;
+    transition: opacity 0.2s; z-index: 100;
+  }
+  #toast.show { opacity: 1; }
+
+  /* Link-mode overlay */
+  #link-mode-banner {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    background: #1a2a10; border: 1px solid var(--green);
+    color: var(--green); font-size: 12px; padding: 6px 18px;
+    border-radius: 4px; display: none; z-index: 20;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  #link-mode-banner.active { display: block; }
+
+  #stats {
+    position: absolute; bottom: 10px; left: 14px;
+    font-size: 10px; color: var(--muted); pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>◆ aicli graph</h1>
+  <button id="btn-load">Load JSON files</button>
+  <button id="btn-add-node">+ Node</button>
+  <button id="btn-link-mode" title="Click a node to start linking, click another to finish">Link mode</button>
+  <button id="btn-save">Save graph.json</button>
+  <input type="file" id="file-input" multiple accept=".json" style="display:none">
+  <span class="hint">Drag to move  ·  Click=select  ·  Dbl-click=edit  ·  Right-click link=delete</span>
+</header>
+
+<div id="canvas">
+  <svg id="svg">
+    <defs>
+      <marker id="arrow" markerWidth="8" markerHeight="8" refX="20" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="var(--muted)" opacity="0.6"/>
+      </marker>
+    </defs>
+    <g id="links-g"></g>
+    <g id="nodes-g"></g>
+  </svg>
+  <div id="panel">
+    <div id="panel-header">
+      <span id="panel-title">Node</span>
+      <button id="panel-close">✕</button>
+    </div>
+    <div id="panel-body" id="panel-content"></div>
+  </div>
+  <div id="link-mode-banner">⬡ Link mode — click the TARGET node  (Esc to cancel)</div>
+  <div id="stats"></div>
+</div>
+<div id="toast"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let graph = { nodes: [], links: [] };
+let simulation;
+let linkMode = false;
+let linkSource = null;
+let selectedNode = null;
+let svgEl, linksG, nodesG, width, height;
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+}
+
+function toast(msg, ms=2000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), ms);
+}
+
+// ── Init D3 ──────────────────────────────────────────────────────────────────
+function init() {
+  svgEl = d3.select('#svg');
+  linksG = d3.select('#links-g');
+  nodesG = d3.select('#nodes-g');
+  const box = document.getElementById('canvas');
+  width = box.clientWidth; height = box.clientHeight;
+
+  const zoom = d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => {
+    linksG.attr('transform', e.transform);
+    nodesG.attr('transform', e.transform);
+  });
+  svgEl.call(zoom);
+
+  simulation = d3.forceSimulation()
+    .force('link', d3.forceLink().id(d => d.id).distance(120))
+    .force('charge', d3.forceManyBody().strength(-350))
+    .force('center', d3.forceCenter(width/2, height/2))
+    .force('collide', d3.forceCollide(40));
+
+  render();
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+function render() {
+  // Links
+  const link = linksG.selectAll('.link').data(graph.links, d => d.id);
+  link.exit().remove();
+  const linkEnter = link.enter().append('line')
+    .attr('class', 'link')
+    .attr('marker-end', 'url(#arrow)')
+    .on('contextmenu', (e, d) => { e.preventDefault(); removeLink(d); })
+    .on('click', (e,d) => highlightLink(d));
+  const linkMerge = linkEnter.merge(link);
+
+  // Link labels
+  const lbl = linksG.selectAll('.link-label').data(graph.links, d => d.id);
+  lbl.exit().remove();
+  lbl.enter().append('text').attr('class','link-label').merge(lbl)
+    .text(d => d.label || '');
+
+  // Nodes
+  const node = nodesG.selectAll('.node').data(graph.nodes, d => d.id);
+  node.exit().remove();
+  const nodeEnter = node.enter().append('g')
+    .attr('class', 'node')
+    .call(d3.drag()
+      .on('start', dragStart)
+      .on('drag', dragging)
+      .on('end', dragEnd))
+    .on('click', nodeClick)
+    .on('dblclick', nodeDblClick);
+
+  nodeEnter.append('circle')
+    .attr('class', d => 'session')
+    .attr('r', 22);
+  nodeEnter.append('text').attr('dy', -2).attr('class','label');
+  nodeEnter.append('text').attr('dy', 12).attr('class','sublabel');
+
+  const nodeMerge = nodeEnter.merge(node);
+  nodeMerge.select('.label').text(d => (d.name||d.id).slice(0,12));
+  nodeMerge.select('.sublabel').text(d => d.msgs ? `${d.msgs}msg` : '');
+  nodeMerge.select('circle')
+    .classed('selected', d => selectedNode && d.id === selectedNode.id)
+    .classed('linking', d => linkSource && d.id === linkSource.id);
+
+  simulation.nodes(graph.nodes).on('tick', () => {
+    linkMerge
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    linksG.selectAll('.link-label')
+      .attr('x', d => (d.source.x + d.target.x)/2)
+      .attr('y', d => (d.source.y + d.target.y)/2);
+    nodeMerge.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+  simulation.force('link').links(graph.links);
+  simulation.alpha(0.3).restart();
+
+  document.getElementById('stats').textContent =
+    `${graph.nodes.length} nodes  ·  ${graph.links.length} links`;
+}
+
+// ── Drag ──────────────────────────────────────────────────────────────────────
+function dragStart(e, d) { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; }
+function dragging(e, d) { d.fx=e.x; d.fy=e.y; }
+function dragEnd(e, d) { if (!e.active) simulation.alphaTarget(0); d.fx=null; d.fy=null; }
+
+// ── Node interactions ─────────────────────────────────────────────────────────
+function nodeClick(e, d) {
+  e.stopPropagation();
+  if (linkMode) {
+    if (!linkSource) {
+      linkSource = d;
+      render();
+      return;
+    }
+    if (linkSource.id !== d.id) {
+      addLink(linkSource, d);
+    }
+    linkSource = null;
+    setLinkMode(false);
+    return;
+  }
+  selectedNode = d;
+  openPanel(d);
+  render();
+}
+
+function nodeDblClick(e, d) {
+  e.stopPropagation();
+  selectedNode = d;
+  openPanel(d);
+  render();
+}
+
+function highlightLink(d) {
+  linksG.selectAll('.link').classed('highlight', l => l.id === d.id);
+}
+
+// ── Panel ─────────────────────────────────────────────────────────────────────
+function openPanel(node) {
+  const panel = document.getElementById('panel');
+  panel.classList.add('open');
+  document.getElementById('panel-title').textContent = node.name || node.id;
+  const connectedLinks = graph.links.filter(l =>
+    l.source.id === node.id || l.target.id === node.id ||
+    l.source === node.id || l.target === node.id);
+  const body = document.getElementById('panel-body');
+  body.innerHTML = `
+    <h3>Node info</h3>
+    <div class="field">
+      <label>Name</label>
+      <input id="p-name" value="${esc(node.name||'')}">
+    </div>
+    <div class="field">
+      <label>Notes</label>
+      <textarea id="p-notes" rows="3">${esc(node.notes||'')}</textarea>
+    </div>
+    <div class="field">
+      <label>Session ID</label>
+      <input value="${esc(node.session_id||node.id)}" readonly style="opacity:0.5">
+    </div>
+    <h3 style="margin-top:14px">Links (${connectedLinks.length})</h3>
+    <ul class="links-list" id="p-links"></ul>
+    <div class="btn-row">
+      <button class="primary" onclick="saveNodeEdits('${node.id}')">Save</button>
+      <button onclick="startLinkFrom('${node.id}')">+ Link</button>
+      <button class="danger" onclick="removeNode('${node.id}')">Delete</button>
+    </div>`;
+  const ul = document.getElementById('p-links');
+  connectedLinks.forEach(l => {
+    const otherId = (l.source.id||l.source) === node.id ? (l.target.id||l.target) : (l.source.id||l.source);
+    const other = graph.nodes.find(n => n.id === otherId);
+    const li = document.createElement('li');
+    li.innerHTML = `<span>${esc(other?.name||otherId)}</span><span class="del" onclick="removeLink({id:'${l.id}'})">✕</span>`;
+    ul.appendChild(li);
+  });
+  document.getElementById('p-name').oninput = () => {};
+}
+
+function closePanel() {
+  document.getElementById('panel').classList.remove('open');
+  selectedNode = null; render();
+}
+
+function saveNodeEdits(id) {
+  const node = graph.nodes.find(n => n.id === id);
+  if (!node) return;
+  node.name  = document.getElementById('p-name').value.trim() || node.name;
+  node.notes = document.getElementById('p-notes').value;
+  document.getElementById('panel-title').textContent = node.name;
+  render(); saveGraph(); toast('Node saved');
+}
+
+// ── Link operations ───────────────────────────────────────────────────────────
+function setLinkMode(on) {
+  linkMode = on;
+  const btn = document.getElementById('btn-link-mode');
+  const banner = document.getElementById('link-mode-banner');
+  btn.classList.toggle('active', on);
+  banner.classList.toggle('active', on);
+  if (!on) { linkSource = null; render(); }
+}
+
+function startLinkFrom(id) {
+  linkSource = graph.nodes.find(n => n.id === id);
+  setLinkMode(true);
+  closePanel();
+}
+
+function addLink(src, tgt) {
+  const exists = graph.links.find(l =>
+    (l.source.id||l.source) === src.id && (l.target.id||l.target) === tgt.id);
+  if (exists) { toast('Link already exists'); return; }
+  graph.links.push({ id: uid(), source: src.id, target: tgt.id, label: '' });
+  render(); saveGraph();
+  toast(`Linked: ${src.name||src.id} → ${tgt.name||tgt.id}`);
+}
+
+function removeLink(d) {
+  graph.links = graph.links.filter(l => l.id !== d.id);
+  render(); saveGraph(); toast('Link removed');
+}
+
+function removeNode(id) {
+  graph.nodes = graph.nodes.filter(n => n.id !== id);
+  graph.links = graph.links.filter(l =>
+    (l.source.id||l.source) !== id && (l.target.id||l.target) !== id);
+  closePanel(); render(); saveGraph(); toast('Node removed');
+}
+
+// ── Add node ──────────────────────────────────────────────────────────────────
+function addManualNode() {
+  const name = prompt('Node name:'); if (!name) return;
+  graph.nodes.push({ id: uid(), name, x: width/2 + (Math.random()-0.5)*200, y: height/2 + (Math.random()-0.5)*200 });
+  render(); saveGraph();
+}
+
+// ── Load JSON files ───────────────────────────────────────────────────────────
+function loadFiles(files) {
+  const readers = [...files].map(f => new Promise(res => {
+    const r = new FileReader();
+    r.onload = e => {
+      try {
+        const d = JSON.parse(e.target.result);
+        // Check if this is a graph save file
+        if (d.nodes && d.links) { res({type:'graph', data:d}); return; }
+        // Otherwise treat as session export
+        res({type:'session', data:d, filename: f.name});
+      } catch { res(null); }
+    };
+    r.readAsText(f);
+  }));
+  Promise.all(readers).then(results => {
+    let added = 0;
+    results.filter(Boolean).forEach(r => {
+      if (r.type === 'graph') {
+        // Merge graph
+        r.data.nodes.forEach(n => { if (!graph.nodes.find(x => x.id===n.id)) graph.nodes.push(n); });
+        r.data.links.forEach(l => { if (!graph.links.find(x => x.id===l.id)) graph.links.push(l); });
+        added++;
+      } else {
+        const d = r.data;
+        const id = d.id || r.filename.replace(/\.json$/,'');
+        if (!graph.nodes.find(n => n.id === id)) {
+          graph.nodes.push({
+            id, name: d.name || id,
+            msgs: d.messages?.length || 0,
+            session_id: d.id,
+            x: width/2 + (Math.random()-0.5)*400,
+            y: height/2 + (Math.random()-0.5)*400,
+          });
+          added++;
+        }
+      }
+    });
+    render(); saveGraph();
+    toast(`Loaded ${added} item(s)`);
+  });
+}
+
+// ── Save / load graph.json ────────────────────────────────────────────────────
+function saveGraph() {
+  const data = {
+    nodes: graph.nodes.map(n => ({...n, x: Math.round(n.x||0), y: Math.round(n.y||0)})),
+    links: graph.links.map(l => ({
+      id: l.id,
+      source: l.source.id||l.source,
+      target: l.target.id||l.target,
+      label: l.label||'',
+    })),
+    saved: new Date().toISOString(),
+  };
+  localStorage.setItem('aicli_graph', JSON.stringify(data));
+}
+
+function loadSavedGraph() {
+  try {
+    const raw = localStorage.getItem('aicli_graph');
+    if (raw) { graph = JSON.parse(raw); toast('Graph restored from browser'); }
+  } catch {}
+}
+
+function downloadGraph() {
+  const data = {
+    nodes: graph.nodes.map(n => ({...n, x: Math.round(n.x||0), y: Math.round(n.y||0)})),
+    links: graph.links.map(l => ({
+      id: l.id,
+      source: l.source.id||l.source,
+      target: l.target.id||l.target,
+      label: l.label||'',
+    })),
+    saved: new Date().toISOString(),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `aicli-graph-${Date.now()}.json`; a.click();
+  toast('graph.json saved');
+}
+
+// ── Keyboard ──────────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (linkMode) setLinkMode(false);
+    else closePanel();
+  }
+  if (e.key === 'l' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT') {
+    setLinkMode(!linkMode);
+  }
+});
+
+svgEl_click_handler = () => { closePanel(); };
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+// ── Wire buttons ──────────────────────────────────────────────────────────────
+document.getElementById('btn-load').onclick = () => document.getElementById('file-input').click();
+document.getElementById('file-input').onchange = e => loadFiles(e.target.files);
+document.getElementById('btn-add-node').onclick = addManualNode;
+document.getElementById('btn-link-mode').onclick = () => setLinkMode(!linkMode);
+document.getElementById('btn-save').onclick = downloadGraph;
+document.getElementById('panel-close').onclick = closePanel;
+
+// Click outside panel to close
+document.getElementById('svg').addEventListener('click', closePanel);
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => { init(); loadSavedGraph(); });
+window.addEventListener('resize', () => {
+  const box = document.getElementById('canvas');
+  width = box.clientWidth; height = box.clientHeight;
+  simulation.force('center', d3.forceCenter(width/2, height/2));
+  simulation.alpha(0.1).restart();
+});
+</script>
+</body>
+</html>

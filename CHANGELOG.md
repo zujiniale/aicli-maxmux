@@ -4,6 +4,83 @@ All notable changes to aicli-maxmux are documented here.
 
 ---
 
+## [1.4.0] — 2026-03-08
+
+### Added
+
+#### TUI Overhaul (`tui.py`)
+- **F1 — Help overlay**: Full keyboard shortcut reference, dismissable with Esc
+- **F2 — Range select**: Click message start → click end → Ctrl+Y copies range to clipboard
+- **F3 — Theme cycling**: 5 built-in themes (Tokyo Night, Dracula, Gruvbox, Nord, Solarized Dark), saved across restarts
+- **F4 — Export session**: Timestamped `.md` + `.json` to exports dir; `__latest.json` always updated
+- **F5 — Import session**: Loads most recent exported `.json` into current session in-place
+- **F6 — Sync all**: Copies `sessions.db` + all TUI config JSONs + graph HTML to exports dir
+- **F7 — Open graph**: Opens graph viewer HTML in browser via `xdg-open`
+- **Ctrl+9 — Settings**: Configurable export folder path + all hotkey remappings, saved to `tui_keys.json`
+- **Ctrl+K — Pin session**: Float to top of list with 📌 icon + amber border, persisted to `tui_pinned.json`
+- **Ctrl+B — Bulk select**: Multi-session operations (delete, export, pin)
+- **Ctrl+J — Backup JSON**: Dump all sessions + summaries to `backup-TIMESTAMP.json`
+- **Ctrl+I — Import JSON**: Restore sessions from most recent backup (existing sessions skipped)
+- **Ctrl+O — Open exports folder**: `xdg-open` exports directory
+- **Ctrl+Y — Smart copy** (4 tiers): range → TextArea selection → message block → last assistant message
+- **Ctrl+R — Typed range copy**: Type `3-7` in input then Ctrl+R to copy messages 3–7
+- **TextArea selectability**: All message bodies use `TextArea(read_only=True)` — text is now selectable and copyable
+- **Real system clipboard**: Uses `wl-copy` → `xclip` → `xsel` → `pbcopy` chain; falls back to `/tmp/aicli_copy.txt`
+- **Dynamic CSS theming**: All colors driven by theme dict; `build_css(theme)` generates full CSS at init
+- **Configurable exports dir**: Default `~/Music/aicli/exports/`; override via Ctrl+9 Settings, stored in `tui_exports.json`
+- **Auto-sync**: DB + config silently synced to exports dir after every assistant message
+- **`--no-history` flag**: `aicli tui --no-history` opens session without loading past messages
+
+#### Graph Viewer (`graph_server.py`, `aicli graph`)
+- `aicli graph` — starts local HTTP server on `localhost:7337`, opens browser automatically
+- Auto-loads all session exports as nodes (no manual file picking)
+- D3 force-directed graph with Tokyo Night theme, JetBrains Mono font
+- Link mode (L key): click two nodes to create a directional link
+- Node panel: rename, add notes, see connections, delete
+- Hover link + click to delete
+- Double-click to edit node
+- Persistent graph state saved to `graph_links.json` in exports dir (reloaded on next `aicli graph`)
+- `aicli graph --port N` — custom port
+- `aicli graph --no-browser` — headless / scripted use
+- R key reloads sessions (picks up new F4 exports without restart)
+
+#### Code Interpreter (`code_runner.py`, `--run`)
+- `--language bash|node|ruby` — generate and run code in non-Python runtimes
+- `--timeout N` — subprocess execution timeout (default: 30s), wraps entire streaming coroutine
+- Live streaming stdout — output appears line-by-line as it runs
+- Correction count in done message: `✓ Done. (2 corrections)` vs `✓ Done.`
+
+#### Plugin System (`loader.py`)
+- `aicli plugin install URL [--name]` — download + install plugin from URL to `~/.config/aicli/plugins/`
+- `aicli plugin doc NAME` — show full description, version, author, source path
+- Async plugin functions auto-wrapped in sync shim — `asyncio.run()` wrapper injected transparently
+- Missing `version` field now emits `UserWarning` instead of silently passing (plugin still loads)
+
+#### Launch Script
+- `start.sh` — opens TUI and graph viewer in two separate terminal windows simultaneously
+  - Auto-detects terminal: kitty → alacritty → gnome-terminal → xterm
+  - Activates venv if present at `./venv/`
+
+### Fixed
+- **Bug #41**: Range-pick second click not registering — `event.widget=NoneType` at App level in Textual 0.89; moved to `MessageBlock.on_click` (widget-level)
+- **Bug #42**: Range state reset between clicks — `_append_message()` during pick mounted new widget triggering recursive event; replaced with `_set_range_status()` (Static update, no DOM change)
+- **Bug #43**: `ctrl+m` dead — terminal converts to ASCII 13 (Enter) before Textual sees it; remapped range-pick to F2
+- **Bug #44**: Hotkeys not firing from input — `call_later(app.on_key, event)` uses dead event; fixed with `call_later(app.action_X)` direct action dispatch
+- **Bug #45**: Exports going to wrong dir — old `_exports_dir()` not replaced; fixed and defaulting to `~/Music/aicli/exports/`
+- **Bug #46**: F5 import navigating away — rewrites INTO current session, calls `_render_chat()` in place
+- **Bug #47**: Graph empty — browser security blocks local file reads; graph server now serves sessions via `/api/sessions`
+
+### Tests
+- 97 passing (up from 84)
+- Added `TestCodeRunnerLanguage` (6 tests): runners map, bash execution, unknown language fallback, timeout propagation
+- Added `TestPluginInstallDoc` (2 tests): async fn wrapper, missing version warning
+- Added `TestCrossSessionRAG` (2 tests): cross-session retrieval, isolation verification
+- Added `TestContextDebugSnippet` (3 tests): sentence-boundary truncation
+
+---
+
+---
+
 ## [1.3.0] — 2026-03-08
 
 ### Added

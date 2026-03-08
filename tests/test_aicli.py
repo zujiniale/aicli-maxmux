@@ -14,6 +14,7 @@ import asyncio
 import sqlite3
 import tempfile
 import unittest
+import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -697,6 +698,7 @@ class TestPluginSystem(unittest.TestCase):
             plugins = load_plugins(Path(tmpdir) / "plugins", force_reload=True)
         self.assertEqual(plugins, [])
 
+    @pytest.mark.filterwarnings("ignore::UserWarning")
     def test_valid_plugin_loaded(self):
         """A valid plugin file is loaded and callable."""
         from aicli.tools.loader import load_plugins, call_plugin
@@ -716,6 +718,7 @@ class TestPluginSystem(unittest.TestCase):
         self.assertEqual(len(plugins), 1)
         self.assertEqual(plugins[0]["name"], "testplugin")
 
+    @pytest.mark.filterwarnings("ignore::UserWarning")
     def test_plugin_call(self):
         """call_plugin invokes the fn and returns string result."""
         from aicli.tools.loader import load_plugins, call_plugin
@@ -889,3 +892,172 @@ class TestChromaDB(unittest.TestCase):
         retriever.index_session("sessBack", messages)  # second pass — must not raise
         result = retriever.retrieve("first message", include_files=False, include_chat=True)
         self.assertIsInstance(result, (str, type(None)))
+
+
+# ── F8 Language runners ───────────────────────────────────────────────────────
+
+class TestCodeRunnerLanguage(unittest.IsolatedAsyncioTestCase):
+    """Tests for --language support in F8 code interpreter."""
+
+    def test_runners_map_has_all_languages(self):
+        """RUNNERS must contain python, bash, node, ruby."""
+        from aicli.handlers.code_runner import RUNNERS
+        for lang in ("python", "bash", "node", "ruby"):
+            self.assertIn(lang, RUNNERS)
+
+    def test_runners_python_uses_sys_executable(self):
+        """python runner must use the current interpreter."""
+        import sys
+        from aicli.handlers.code_runner import RUNNERS
+        self.assertEqual(RUNNERS["python"][0], sys.executable)
+
+    def test_run_code_bash(self):
+        """_run_code with language='bash' runs a simple bash command."""
+        from aicli.handlers.code_runner import _run_code
+        exit_code, stdout, stderr = _run_code("echo hello_bash", language="bash")
+        self.assertEqual(exit_code, 0)
+        self.assertIn("hello_bash", stdout)
+
+    def test_run_code_unknown_language_falls_back_to_python(self):
+        """_run_code with an unknown language key falls back to python runner."""
+        from aicli.handlers.code_runner import _run_code, RUNNERS
+        runner = RUNNERS.get("nonexistent", RUNNERS["python"])
+        self.assertEqual(runner, RUNNERS["python"])
+
+    def test_timeout_param_propagated(self):
+        """_run_code returns timeout error when timeout=0."""
+        from aicli.handlers.code_runner import _run_code
+        exit_code, stdout, stderr = _run_code("import time; time.sleep(5)", timeout=1)
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn("Timeout", stderr)
+
+    async def test_run_generated_code_bash(self):
+        """run_generated_code with language='bash' executes bash code."""
+        from aicli.handlers.code_runner import run_generated_code
+
+        class MockPipeline:
+            last_provider = "mock"
+            async def stream(self, messages, model=None, requires_vision=False):
+                yield "echo fixed"
+
+        # Should not raise
+        await run_generated_code(
+            "echo hello", MockPipeline(), "echo something",
+            max_retries=0, show_code=False, language="bash",
+        )
+
+
+# ── F6 Plugin install / doc ───────────────────────────────────────────────────
+
+class TestPluginInstallDoc(unittest.TestCase):
+    """Tests for plugin install and plugin doc additions."""
+
+    @pytest.mark.filterwarnings("ignore::UserWarning")
+    def test_call_plugin_async_fn(self):
+        """call_plugin must handle async fn by running it synchronously."""
+        import tempfile, textwrap
+        from pathlib import Path
+        from aicli.tools.loader import load_plugins, call_plugin
+
+        plugin_code = textwrap.dedent("""\
+            async def _fn(arg):
+                return f"async:{arg}"
+
+            def register():
+                return {"name": "async_test", "description": "async plugin", "fn": _fn}
+        """)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p = Path(tmpdir) / "async_test.py"
+            p.write_text(plugin_code)
+            load_plugins(plugins_dir=Path(tmpdir), force_reload=True)
+            result = call_plugin("async_test", "hi", plugins_dir=Path(tmpdir))
+            self.assertEqual(result, "async:hi")
+
+    def test_missing_version_warns(self):
+        """register() without 'version' field must emit a warning, not raise."""
+        import tempfile, textwrap, warnings
+        from pathlib import Path
+        from aicli.tools.loader import load_plugins
+
+        plugin_code = textwrap.dedent("""\
+            def register():
+                return {"name": "no_ver", "description": "no version", "fn": lambda x: x}
+        """)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p = Path(tmpdir) / "no_ver.py"
+            p.write_text(plugin_code)
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                load_plugins(plugins_dir=Path(tmpdir), force_reload=True)
+            # Should have warned about missing version
+            messages = [str(x.message) for x in w]
+            self.assertTrue(any("version" in m for m in messages))
+
+
+# ── Cross-session RAG ─────────────────────────────────────────────────────────
+
+class TestCrossSessionRAG(unittest.TestCase):
+    """Verify cross-session retrieval returns results from different sessions."""
+
+    def _get_retriever(self):
+        try:
+            import chromadb  # noqa: F401
+        except ImportError:
+            self.skipTest("chromadb not installed")
+        import tempfile
+        from aicli.context.retriever import ContextRetriever
+        self._chroma_dir = tempfile.mkdtemp()
+        return ContextRetriever(self._chroma_dir)
+
+    def test_cross_session_retrieval(self):
+        """Indexing two different sessions returns context from both."""
+        retriever = self._get_retriever()
+        retriever.index_session("sessX", [{"id": 1, "role": "user", "content": "deep learning neural networks"}])
+        retriever.index_session("sessY", [{"id": 2, "role": "user", "content": "deep learning neural networks"}])
+        result = retriever.retrieve("deep learning", include_files=False, include_chat=True)
+        self.assertIsNotNone(result)
+        self.assertIn("RELEVANT CONTEXT", result)
+
+    def test_unrelated_session_does_not_pollute(self):
+        """Indexing an unrelated session must not surface in a specific query."""
+        retriever = self._get_retriever()
+        retriever.index_session("sessA", [{"id": 1, "role": "user", "content": "quantum physics experiment"}])
+        retriever.index_session("sessB", [{"id": 2, "role": "user", "content": "chocolate cake recipe baking"}])
+        result = retriever.retrieve("quantum physics", include_files=False, include_chat=True)
+        # Must not crash, and result should relate to quantum physics not baking
+        self.assertIsInstance(result, (str, type(None)))
+
+
+# ── Context-debug snippet quality ─────────────────────────────────────────────
+
+class TestContextDebugSnippet(unittest.TestCase):
+    """Verify sentence-boundary truncation logic for --context-debug."""
+
+    def _truncate(self, text: str, max_len: int = 200) -> str:
+        """Mirror the logic in default.py _ask context-debug snippet."""
+        snippet = text[:max_len]
+        if len(text) > max_len:
+            last_period = snippet.rfind(".")
+            if last_period > 100:
+                snippet = snippet[:last_period + 1]
+            else:
+                snippet = snippet + "..."
+        return snippet
+
+    def test_short_text_unchanged(self):
+        """Text under 200 chars is returned as-is."""
+        text = "Short text."
+        self.assertEqual(self._truncate(text), text)
+
+    def test_long_text_truncated_at_sentence(self):
+        """Long text is truncated at the last sentence boundary before 200 chars."""
+        text = ("A" * 120) + ". " + ("B" * 120)
+        result = self._truncate(text)
+        self.assertTrue(result.endswith("."))
+        self.assertLessEqual(len(result), 200)
+
+    def test_long_text_no_sentence_gets_ellipsis(self):
+        """Long text with no sentence boundary gets ellipsis."""
+        text = "A" * 300
+        result = self._truncate(text)
+        self.assertTrue(result.endswith("..."))

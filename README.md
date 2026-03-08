@@ -17,6 +17,10 @@ No vendor lock-in. No single point of failure. All keys stored encrypted locally
 | Autonomous multi-step agent | `aicli agent "set up a Python project"` |
 | Semantic RAG over chat history | `aicli chat --context` |
 | Session export (Markdown / JSON) | `aicli export mysession > out.md` |
+| Full terminal UI with themes, clipboard, range select | `aicli tui` |
+| Interactive session graph viewer | `aicli graph` |
+| Run generated code in Python / Bash / Node / Ruby | `aicli ask --code --run --language bash "..."` |
+| Plugin system — drop `.py` files to extend aicli | `aicli plugin list` |
 | Encrypted key storage, no shell exports | `aicli config set TAVILY_API_KEY tvly-xxxx` |
 | Tor / proxy support | `aicli config set AICLI_PROXY socks5://127.0.0.1:9050` |
 
@@ -91,6 +95,10 @@ aicli ask --web "prompt"              # web search + answer
 aicli ask --web-debug "prompt"        # debug web backends (clean output)
 aicli ask --web-debug --web-verbose   # debug web backends (full output)
 aicli ask --context "prompt"          # inject semantic context from history
+aicli ask --code --run "prompt"       # generate + run code (Python default)
+aicli ask --code --run --language bash "prompt"   # run as bash
+aicli ask --code --run --language node "prompt"   # run as node.js
+aicli ask --code --run --timeout 60 "prompt"      # custom timeout (seconds)
 
 aicli chat --session NAME             # persistent conversation
 aicli repl                            # interactive REPL
@@ -112,7 +120,82 @@ aicli session list                    # list all sessions
 aicli session show NAME               # show session messages
 aicli session delete NAME             # delete a session
 aicli index PATH                      # index files for RAG
+
+aicli graph                           # session graph viewer (browser)
+aicli graph --port 8080               # custom port
+aicli graph --no-browser              # no auto-open
+
+aicli plugin list                     # list installed plugins
+aicli plugin run NAME ARG             # run a plugin
+aicli plugin install URL              # install plugin from URL
+aicli plugin doc NAME                 # show plugin details
+aicli plugin errors                   # show load errors
+
+./start.sh                            # open TUI + graph together
 ```
+
+
+## Terminal UI (TUI)
+
+```bash
+aicli tui                        # open TUI
+aicli tui --session myproject    # open specific session
+aicli tui --no-history           # open without loading past messages
+```
+
+### TUI Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| **F1** | Help overlay |
+| **F2** | Range select (click start → click end → Ctrl+Y) |
+| **F3** | Cycle theme (Tokyo Night / Dracula / Gruvbox / Nord / Solarized) |
+| **F4** | Export session to timestamped `.md` + `.json` |
+| **F5** | Import latest exported session JSON into current session |
+| **F6** | Sync all data to exports folder |
+| **F7** | Open graph viewer in browser |
+| **Ctrl+N** | New session |
+| **Ctrl+D** | Delete session (or bulk) |
+| **Ctrl+K** | Pin / unpin session |
+| **Ctrl+B** | Toggle bulk select mode |
+| **Ctrl+E** | Export to markdown (single or bulk) |
+| **Ctrl+J** | Backup all sessions to JSON |
+| **Ctrl+I** | Import from most recent backup |
+| **Ctrl+W** | Toggle web search |
+| **Ctrl+X** | Toggle RAG context |
+| **Ctrl+S** | Summarize current session |
+| **Ctrl+Y** | Copy message to clipboard |
+| **Ctrl+R** | Copy typed range (e.g. type `3-7` then Ctrl+R) |
+| **Ctrl+O** | Open exports folder |
+| **Ctrl+9** | Settings (export path + hotkey remapping) |
+| **Ctrl+Q** | Quit |
+| **Esc** | Clear range select |
+
+Requires: `pip install textual`
+
+## Session Graph
+
+```bash
+aicli graph                  # start graph server + open browser
+aicli graph --port 8080      # custom port
+aicli graph --no-browser     # headless use
+```
+
+An interactive D3 force-directed graph that auto-loads all your exported sessions as nodes. Create links between sessions, add notes, and explore connections.
+
+**Browser shortcuts:** `L` link mode · `R` reload · `Esc` cancel · double-click to edit · hover link + click to delete
+
+Sessions exported via **F4** in the TUI appear automatically on next reload.
+
+## Quick Launch
+
+Open TUI and graph side by side in one command:
+
+```bash
+./start.sh
+```
+
+Auto-detects your terminal emulator (kitty, alacritty, gnome-terminal, xterm).
 
 ## Web Search
 
@@ -138,7 +221,9 @@ Tor/proxy support works out of the box — Tavily is used as the primary backend
 ## Requirements
 
 - Python 3.10+
+- Optional: `pip install textual` for TUI (`aicli tui`)
 - Optional: `pip install pysocks` for Tor/SOCKS5 support
+- Optional: `sudo apt install xclip` for TUI clipboard on Linux (Ctrl+Y)
 
 ## License
 

@@ -9,7 +9,7 @@ from ..tools.builtin.shell import shell_menu, execute_with_self_correction
 from ..image_utils import build_multimodal_content, is_multimodal
 
 
-async def _ask(prompt_parts, shell, code, describe, model, no_stream, json_output, dry_run, context=False, context_depth=1, images=None, web=False, web_debug=False, web_verbose=False, cross_session=False, context_debug=False, min_score=0.40, run=False, max_retries=3):
+async def _ask(prompt_parts, shell, code, describe, model, no_stream, json_output, dry_run, context=False, context_depth=1, images=None, web=False, web_debug=False, web_verbose=False, cross_session=False, context_debug=False, min_score=0.40, run=False, max_retries=3, language="python", timeout=30):
     config = load_config()
 
     # Collect prompt from args and/or stdin
@@ -38,7 +38,19 @@ async def _ask(prompt_parts, shell, code, describe, model, no_stream, json_outpu
     # Build messages
     messages = []
     if role.system_prompt:
-        messages.append({"role": "system", "content": role.system_prompt})
+        # When --language is set to a non-Python runtime, override the code
+        # system prompt so the LLM generates the correct language
+        if code and language != "python":
+            lang_cap = language.capitalize()
+            lang_prompt = (
+                f"You are a {lang_cap} code generation assistant. "
+                f"Output ONLY raw {lang_cap} code with no explanation, "
+                f"no markdown fences, no backticks. "
+                f"The code must be complete and runnable as-is with {language}."
+            )
+            messages.append({"role": "system", "content": lang_prompt})
+        else:
+            messages.append({"role": "system", "content": role.system_prompt})
 
     # Inject RAG context if --context flag set
     if context:
@@ -58,9 +70,16 @@ async def _ask(prompt_parts, shell, code, describe, model, no_stream, json_outpu
                         lines = section.strip().splitlines()
                         if lines:
                             print(f"  [33m{lines[0]}[0m")
-                            snippet = " ".join(lines[1:])[:120].strip()
+                            full_snippet = " ".join(lines[1:]).strip()
+                            snippet = full_snippet[:200]
+                            if len(full_snippet) > 200:
+                                last_period = snippet.rfind(".")
+                                if last_period > 100:
+                                    snippet = snippet[:last_period + 1]
+                                else:
+                                    snippet = snippet + "..."
                             if snippet:
-                                print(f"  [90m{snippet}...[0m")
+                                print(f"  [90m{snippet}[0m")
                     print()
                 messages.append({"role": "system", "content": context_block})
             elif context_debug:
@@ -176,6 +195,8 @@ async def _ask(prompt_parts, shell, code, describe, model, no_stream, json_outpu
                     model=model,
                     max_retries=max_retries,
                     show_code=True,  # pretty-print via rich before running
+                    language=language,
+                    timeout=timeout,
                 )
         else:
             # Default/code/describe/dry-run: stream directly
