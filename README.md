@@ -1,6 +1,6 @@
 # aicli-maxmux
 
-![Version](https://img.shields.io/badge/version-1.5.0-ff4488) ![Tests](https://img.shields.io/badge/tests-97%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.10%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80)
+![Version](https://img.shields.io/badge/version-1.5.0-ff4488) ![Tests](https://img.shields.io/badge/tests-193%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.10%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80)
 
 A free, private, terminal-native AI CLI with multi-provider failover, persistent memory,
 web search, vision support, and autonomous agent mode.
