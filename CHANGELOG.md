@@ -4,6 +4,50 @@ All notable changes to aicli-maxmux are documented here.
 
 ---
 
+## [1.5.0] — 2026-03-08
+
+### Added
+
+#### Launch Script Overhaul (`start.sh`)
+- **3-pane wmctrl layout**: TUI left ¾ (full height) · Graph terminal top-right ¼ · Firefox bottom-right ¼
+- **Auto-installs `wmctrl`** if not present (`sudo apt-get install -y wmctrl -qq`)
+- **Auto-detects screen resolution** via `xdpyinfo`; falls back to 1920×1080 if unavailable
+- **Named terminal titles** (`aicli — TUI`, `aicli — Graph`) so wmctrl can reliably target each window
+- **Auto-opens Firefox** to `http://localhost:7337` (graph viewer) on launch
+- **Startup status print**: layout coordinates, graph URL printed to stdout on launch
+- **venv activation** preserved from previous version — still activates `./venv/` if present
+- Positions all three windows after a staggered `sleep` to allow windows time to open
+
+#### Documentation Suite
+- **`AICLI_DOCS.md`** — comprehensive project documentation:
+  - Full component breakdown (TUI, graph server, Firefox view)
+  - Annotated `start.sh` walkthrough
+  - All 4 roadmap tracks with implementation detail
+  - ~35 specific test function stubs for `TestTUI`, `TestGraphServer`, `TestWebSearch`
+  - 6-tier feature roadmap
+- **`MASTER_ROADMAP.md`** — unified prioritized roadmap (aicli + companion CrudLogin project):
+  - Reward / Effort / Unlocks scoring for every item
+  - Week-by-week 6-week execution plan
+  - Full impact matrix table
+- **`MASTER_SESSION_DOC.md`** — 1,052-line complete session record:
+  - Every exchange, decision, and root cause documented
+  - All code patterns with copy-paste snippets
+  - All bugs fixed with root cause + fix
+
+### Roadmap (Tracked — not yet implemented)
+The following items were scoped and documented this session for upcoming releases:
+
+- **`TestTUI`** — ~15 tests: TUI render, input handling, session lifecycle, error paths
+- **`TestGraphServer`** — ~12 tests: HTTP routes, node/edge CRUD, graph serialization, `/api/sessions`
+- **`TestWebSearch`** — ~8 tests: query formatting, result parsing, network error handling
+- **v1.5.x: Graph node tags + filtering** — `aicli tag <id> <tags>`, filter sidebar in graph UI
+- **v1.5.x: `aicli serve`** — local HTTP API (`POST /ask`, `GET /sessions`) for scripting + MCP
+- **v1.5.x: Vim-style TUI navigation** — `j/k` scroll, `/` search, `dd` delete, `:q` quit
+- **v1.6.x: Obsidian export** — `aicli export --obsidian <vault>` → `.md` + `[[wikilinks]]`
+- **v2.0.x: MCP server** — expose aicli as Claude Desktop tool via Model Context Protocol
+
+---
+
 ## [1.4.0] — 2026-03-08
 
 ### Added

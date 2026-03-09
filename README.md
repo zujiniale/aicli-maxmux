@@ -1,5 +1,7 @@
 # aicli-maxmux
 
+![Version](https://img.shields.io/badge/version-1.5.0-ff4488) ![Tests](https://img.shields.io/badge/tests-97%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.10%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80)
+
 A free, private, terminal-native AI CLI with multi-provider failover, persistent memory,
 web search, vision support, and autonomous agent mode.
 
@@ -189,13 +191,29 @@ Sessions exported via **F4** in the TUI appear automatically on next reload.
 
 ## Quick Launch
 
-Open TUI and graph side by side in one command:
+Open TUI, graph server, and browser graph view in one command:
 
 ```bash
 ./start.sh
 ```
 
-Auto-detects your terminal emulator (kitty, alacritty, gnome-terminal, xterm).
+**What it opens:**
+```
+┌────────────────────┬──────────┐
+│                    │  Graph   │
+│   aicli TUI        │ terminal │
+│   (left ¾,         ├──────────┤
+│    full height)    │ Firefox  │
+│                    │  :7337   │
+└────────────────────┴──────────┘
+```
+
+- Auto-installs `wmctrl` if missing
+- Detects screen resolution via `xdpyinfo` (fallback 1920×1080)
+- Opens Firefox to `http://localhost:7337` automatically
+- Positions all 3 windows with exact pixel coordinates
+
+**Requirements:** `wmctrl`, `xdpyinfo` (both auto-installed on first run)
 
 ## Web Search
 
@@ -224,6 +242,23 @@ Tor/proxy support works out of the box — Tavily is used as the primary backend
 - Optional: `pip install textual` for TUI (`aicli tui`)
 - Optional: `pip install pysocks` for Tor/SOCKS5 support
 - Optional: `sudo apt install xclip` for TUI clipboard on Linux (Ctrl+Y)
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for full version history.
+
+**Latest: v1.5.0** — 3-pane wmctrl launch layout · comprehensive documentation suite · roadmap scoped through v2.0
+
+## Roadmap
+
+| Version | Feature | Status |
+|---------|---------|--------|
+| v1.5.x | Graph node tags + filtering | 📋 Scoped |
+| v1.5.x | `aicli serve` local HTTP API | 📋 Scoped |
+| v1.5.x | Vim-style TUI navigation (`j/k`, `/`, `dd`) | 📋 Scoped |
+| v1.5.x | Missing tests: `TestTUI`, `TestGraphServer`, `TestWebSearch` | 📋 Scoped |
+| v1.6.x | Obsidian export (`[[wikilinks]]`) | 📋 Scoped |
+| v2.0.x | MCP server (Claude Desktop integration) | 📋 Scoped |
 
 ## License
 
