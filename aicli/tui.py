@@ -49,6 +49,8 @@ ACTIONS = [
     ("import_session",  "f5",     "Import session from .json file"),
     ("sync_now",        "f6",     "Sync all data to exports folder"),
     ("open_graph",      "f7",     "Open graph viewer in browser"),
+    ("send",            "f8",     "Send message"),
+    ("send_ctrl",        "ctrl+g",  "Send message (Ctrl+G)"),
     ("range_pick",     "f2",  "Range select mode"),
     ("cycle_theme",    "f3",  "Cycle theme (5 built-in themes)"),
     ("copy_range",     "ctrl+r",  "Copy typed range (type 3-7 then Ctrl+R)"),
@@ -235,12 +237,25 @@ MessageBlock {{ height: auto; background: {t['bg']}; margin-bottom: 1; }}
 #range-status.visible {{ display: block; }}
 #thinking {{ height: 1; background: {t['bg']}; color: {t['amber']}; text-style: italic; padding: 0 2; display: none; }}
 #thinking.visible {{ display: block; }}
-#input-area {{ height: auto; max-height: 6; border-top: solid {t['border']}; background: {t['bg_alt']}; padding: 0 1; }}
+#input-area {{ height: 5; border-top: solid {t['border']}; background: {t['bg_alt']}; padding: 0; }}
+#send-arrow {{
+    width: 5; height: 5; min-width: 5;
+    background: {t['accent']}; color: {t['bg']};
+    border: none; text-style: bold;
+}}
+#send-arrow:hover {{ background: {t['green']}; }}
+#send-arrow:focus {{ background: {t['accent']}; border: none; }}
 #prompt-input {{
-    height: auto; min-height: 3; border: solid {t['border']};
+    height: 5; width: 1fr; border: solid {t['border']};
     background: {t['bg_msg']}; color: {t['text']}; padding: 0 1;
 }}
 #prompt-input:focus {{ border: solid {t['accent']}; }}
+#send-btn {{
+    height: 3; width: 12; min-width: 12;
+    background: {t['accent']}; color: {t['bg']};
+    text-style: bold;
+}}
+#send-btn:hover {{ background: {t['green']}; }}
 #status-bar {{ height: 1; background: {t['status_bg']}; color: {t['muted']}; padding: 0 2; content-align: left middle; }}
 HelpScreen, SettingsScreen {{ background: {t['bg']}99; align: center middle; }}
 #help-box, #settings-box {{
@@ -526,13 +541,27 @@ class SettingsScreen(Screen):
 class HotkeyInput(Input):
     """
     Input subclass that maps hotkeys directly to App actions.
-    F2 = ASCII 13 which Input treats as Enter — must intercept here.
-    call_later(app.action_X) is the correct Textual 0.89 pattern.
+    Uses on_key (public) not _on_key (internal) for Textual 0.89 compatibility.
+    Also handles on_input_submitted for Enter key as a belt-and-suspenders approach.
     """
-    def _on_key(self, event) -> None:
+    def on_key(self, event) -> None:
         app = self.app
         key = event.key
-        if key == "f2":
+        if key == "enter":
+            if self.id == "prompt-input":
+                event.stop(); event.prevent_default()
+                app.action_send()
+            else:
+                super()._on_key(event)
+        elif key == "ctrl+enter":
+            if self.id == "prompt-input":
+                event.stop(); event.prevent_default()
+                app.action_newline()
+        elif key == "f8":
+            if self.id == "prompt-input":
+                event.stop(); event.prevent_default()
+                app.action_send()
+        elif key == "f2":
             event.stop(); event.prevent_default()
             app.call_later(app.action_range_pick)
         elif key == "ctrl+r":
@@ -590,7 +619,14 @@ class HotkeyInput(Input):
             event.stop(); event.prevent_default()
             app.call_later(app.action_settings)
         else:
+            # Must pass unhandled keys to super so normal typing works
             super()._on_key(event)
+
+    def on_input_submitted(self, event: "Input.Submitted") -> None:
+        """Belt-and-suspenders: also catch Enter via the submitted event."""
+        if self.id == "prompt-input":
+            event.stop()
+            self.app.action_send()
 
 
 class StatusBar(Static):
@@ -704,9 +740,10 @@ class AicliTUI(App):
         Binding("f5",      "import_session_file", "Import session", priority=True),
         Binding("f6",      "sync_now",            "Sync",           priority=True),
         Binding("f7",      "open_graph",          "Graph",          priority=True),
-        Binding("escape",  "clear_range",  "Clear",       show=False),
-        Binding("enter",      "send",      "Send",        show=False),
-        Binding("ctrl+enter", "newline",   "Newline",     show=False),
+        Binding("f8",      "send",         "Send",  priority=True),
+        Binding("escape",  "clear_range",  "Clear", show=False),
+        Binding("enter",      "send",    "Send",    show=False, priority=True),
+        Binding("ctrl+enter", "newline",  "Newline", show=False),
     ]
 
     active_session_id:   reactive[str | None] = reactive(None)
@@ -749,6 +786,8 @@ class AicliTUI(App):
         elif self._sessions:
             self._open_session(self._sessions[0])
         self._update_status()
+        # Focus the prompt input so Enter/F8 work immediately
+        self.call_after_refresh(lambda: self.query_one("#prompt-input", Input).focus())
 
     def _load_backend(self) -> None:
         from aicli.config import load_config
@@ -804,8 +843,9 @@ class AicliTUI(App):
                 yield Static("", id="thinking")
                 yield Static(self._flags_text(), id="flags-bar")
                 yield Static("", id="range-status")
-                with Vertical(id="input-area"):
-                    yield HotkeyInput(placeholder="  Type a message…  (Enter=send  F2=range  F1=help)", id="prompt-input")
+                with Horizontal(id="input-area"):
+                    yield HotkeyInput(placeholder="  Type a message and click ▶ to send", id="prompt-input")
+                    yield Button("▶", id="send-arrow", variant="primary")
         yield StatusBar(id="status-bar")
         yield Footer()
 
@@ -983,13 +1023,24 @@ class AicliTUI(App):
                 break
             node = getattr(node, "parent", None)
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Fires when user presses Enter in any Input widget."""
+        if event.input.id == "prompt-input":
+            event.stop()
+            self.action_send()
 
-    async def action_send(self) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Send button and ▶ arrow click."""
+        if event.button.id in ("send-btn", "send-arrow"):
+            self.action_send()
+
+
+    def action_send(self) -> None:
         inp = self.query_one("#prompt-input", Input)
         prompt = inp.value.strip()
         if not prompt or self.is_thinking or not self.active_session_id: return
         inp.value = ""
-        await self._send_message(prompt)
+        self.run_worker(self._send_message(prompt), exclusive=False)
 
     def action_newline(self) -> None:
         inp = self.query_one("#prompt-input", Input)
@@ -1319,26 +1370,13 @@ class AicliTUI(App):
             self._append_message("system", f"[F6 Sync error: {e}]")
 
     def action_open_graph(self) -> None:
-        """F7: open the graph viewer HTML in the browser."""
-        import shutil
-        d = _exports_dir()
-        graph_html = d / "graph.html"
-        # Copy latest graph.html to exports if not there
-        if not graph_html.exists():
-            try:
-                src = Path(__file__).parent / "aicli_graph.html"
-                if src.exists():
-                    shutil.copy2(src, graph_html)
-            except Exception:
-                pass
-        if graph_html.exists():
-            try:
-                subprocess.Popen(["xdg-open", str(graph_html)])
-                self._append_message("system", f"[F7 Graph \u2192  {graph_html}]")
-            except Exception:
-                self._append_message("system", f"[F7 Graph: open {graph_html} in browser]")
-        else:
-            self._append_message("system", f"[F7 Graph: graph.html not found — run F6 sync first]")
+        """F7: open the graph server in the browser at localhost:7337."""
+        graph_url = "http://localhost:7337/"
+        try:
+            subprocess.Popen(["xdg-open", graph_url])
+            self._append_message("system", f"[F7 Graph → {graph_url}  (run: aicli graph)]")
+        except Exception:
+            self._append_message("system", f"[F7 Graph: open {graph_url} in browser  |  run: aicli graph]")
 
     def action_open_location(self) -> None:
         folder = str(_exports_dir())
@@ -1357,7 +1395,7 @@ class AicliTUI(App):
             self._append_message("system", f"[Exports folder: {folder}]")
 
     def action_summarize(self) -> None:
-        if self.active_session_id: self.call_later(self._run_summarize)
+        if self.active_session_id: self.run_worker(self._run_summarize(), exclusive=False)
 
     async def _run_summarize(self) -> None:
         if not self._pipeline or not self.active_session_id: return
@@ -1369,7 +1407,7 @@ class AicliTUI(App):
         ctx = ContextManager(session_id=self.active_session_id, pipeline=self._pipeline,
                              config=self._config or {}, db_path=None)
         try:
-            summary = await ctx.summarize_now(messages)
+            summary = await ctx.summarize_now()
             if summary:
                 save_summary(self._conn, self.active_session_id, summary, 0, len(messages))
                 self._append_message("system",f"[AUTO-SUMMARY] {summary}")
@@ -1401,6 +1439,9 @@ class AicliTUI(App):
         elif event.key == "f7":
             event.stop(); event.prevent_default()
             self.action_open_graph()
+        elif event.key == "f8":
+            event.stop(); event.prevent_default()
+            self.action_send()
         elif event.key == "ctrl+9":
             event.stop(); event.prevent_default()
             def _cb(k):
