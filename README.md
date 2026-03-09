@@ -1,6 +1,6 @@
 # aicli-maxmux
 
-![Version](https://img.shields.io/badge/version-1.5.0-ff4488) ![Tests](https://img.shields.io/badge/tests-193%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.10%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80)
+![Version](https://img.shields.io/badge/version-1.5.1-ff4488) ![Tests](https://img.shields.io/badge/tests-193%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.10%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80)
 
 A free, private, terminal-native AI CLI with multi-provider failover, persistent memory,
 web search, vision support, and autonomous agent mode.
@@ -171,6 +171,8 @@ aicli tui --no-history           # open without loading past messages
 | **Ctrl+O** | Open exports folder |
 | **Ctrl+9** | Settings (export path + hotkey remapping) |
 | **Ctrl+Q** | Quit |
+| **Enter** | Send message |
+| **Ctrl+Enter** | Insert newline (multiline messages) |
 | **Esc** | Clear range select |
 
 Requires: `pip install textual`
@@ -247,7 +249,7 @@ Tor/proxy support works out of the box — Tavily is used as the primary backend
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
-**Latest: v1.5.0** — 3-pane wmctrl launch layout · comprehensive documentation suite · roadmap scoped through v2.0
+**Latest: v1.5.1** — TUI send fixed · ▶ send button · Enter=send · Ctrl+Enter=newline · taller input bar · F7 graph URL fix · summarize fix
 
 ## Roadmap
 

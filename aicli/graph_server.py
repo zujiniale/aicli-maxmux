@@ -402,17 +402,56 @@ class GraphHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def _kill_existing(port: int) -> bool:
+    """Kill any process already listening on port. Returns True if something was killed."""
+    import subprocess, signal
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f"tcp:{port}"],
+            capture_output=True, text=True
+        )
+        pids = result.stdout.strip().split()
+        if not pids:
+            return False
+        for pid in pids:
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+            except (ProcessLookupError, ValueError):
+                pass
+        import time; time.sleep(0.4)
+        return True
+    except FileNotFoundError:
+        # lsof not available — try fuser
+        try:
+            subprocess.run(["fuser", "-k", f"{port}/tcp"],
+                           capture_output=True)
+            return True
+        except FileNotFoundError:
+            return False
+
+
+class ReusableTCPServer(http.server.HTTPServer):
+    """HTTPServer with allow_reuse_address=True so the port recycles immediately
+    after Ctrl+C without waiting for TIME_WAIT to expire."""
+    allow_reuse_address = True
+
+
 def run_graph_server(port: int = 7337, open_browser: bool = True):
     exports = _exports_dir()
+
+    # Kill any existing server on this port first
+    if _kill_existing(port):
+        print(f"\033[90m  ◆ Stopped existing server on :{port}\033[0m")
+
     print(f"\033[1m◆ aicli graph\033[0m  →  http://localhost:{port}")
     print(f"  Sessions from: {exports}")
     print(f"  Press Ctrl+C to stop\n")
 
-    server = http.server.HTTPServer(("localhost", port), GraphHandler)
+    server = ReusableTCPServer(("localhost", port), GraphHandler)
 
     if open_browser:
         def _open():
-            import time; time.sleep(0.4)
+            import time; time.sleep(0.5)
             webbrowser.open(f"http://localhost:{port}")
         threading.Thread(target=_open, daemon=True).start()
 
@@ -420,3 +459,5 @@ def run_graph_server(port: int = 7337, open_browser: bool = True):
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n\033[90m  Graph server stopped.\033[0m")
+    finally:
+        server.server_close()

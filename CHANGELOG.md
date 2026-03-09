@@ -4,6 +4,28 @@ All notable changes to aicli-maxmux are documented here.
 
 ---
 
+## [1.5.1] — 2026-03-09
+
+### Fixed
+
+#### TUI (`tui.py`)
+- **Bug #48**: Sending messages broken — `HotkeyInput.on_key` missing `super()._on_key(event)` fallback caused all unhandled keys (including regular typing) to be silently dropped; fixed by adding `else: super()._on_key(event)`
+- **Bug #49**: `action_send` was `async def` but called via `call_later()` which doesn't await coroutines — silently no-ops every time; fixed by making `action_send` a sync `def` that launches `_send_message` via `run_worker()`
+- **Bug #50**: `action_summarize` used `call_later(self._run_summarize)` which doesn't run async functions; fixed with `run_worker(self._run_summarize(), exclusive=False)`
+- **Bug #51**: `ctx.summarize_now(messages)` passed messages as argument but method takes no positional args; fixed to `ctx.summarize_now()`
+- **Bug #52**: F7 opened static `graph.html` file (empty due to browser security blocking local file reads); fixed to open `http://localhost:7337/` directly
+- **Bug #53**: Prompt input not focused on startup — Enter/hotkeys appeared dead on first launch; fixed with `call_after_refresh(lambda: query_one("#prompt-input").focus())` in `on_mount`
+
+### Added
+
+#### TUI (`tui.py`)
+- **▶ Send button**: Clickable send button next to input bar — works regardless of terminal F-key interception
+- **Enter = send**: Native `on_input_submitted` at App level + `HotkeyInput.on_key` both handle Enter to send
+- **Ctrl+Enter = newline**: Insert newline for multiline messages (replaces send)
+- **Taller input bar**: Input area height increased from 3 to 5 rows for comfortable typing
+
+---
+
 ## [1.5.0] — 2026-03-08
 
 ### Added

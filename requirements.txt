@@ -7,6 +7,7 @@
 cryptography>=42.0.0        # Fernet encryption: API key storage + chat history
 click>=8.1.0                # CLI framework (commands, groups, options, flags)
 pytest>=9.0.0               # Test runner
+pytest-asyncio>=0.23.0      # Required for async test suite execution
 tiktoken>=0.7.0             # Exact token counting
 
 # ── Drop-in upgrades (install when ready — no code changes needed) ────────────

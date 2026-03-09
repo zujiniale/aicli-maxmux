@@ -546,7 +546,7 @@ class TestMigrateKeys(unittest.TestCase):
                             if key == "GROQ_API_KEY":
                                 return "gsk-test-migrate-key"
                             return None
-                        with patch.object(cfg_mod._keyring, "get_password", mock_get_password):
+                        with patch("keyring.get_password", mock_get_password):
                             migrated = migrate_all_keys()
                         self.assertIn("GROQ_API_KEY", migrated)
                         # Verify it's now in the Fernet file
