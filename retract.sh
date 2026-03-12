@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 
 # aicli - Project Retraction Script
-# Removes venv and all build artifacts — leaves core code only
+# Removes venv and all build artifacts — leaves core code and dist/ wheel intact
 
 # Colors
 GREEN='\033[0;32m'
@@ -31,9 +31,10 @@ if [ -d ".venv" ]; then
     HAS_DEPENDENCIES=true
 fi
 
-# Check for build artifacts even without a venv
 HAS_PYCACHE=false
 HAS_PYTEST_CACHE=false
+HAS_EGGINFO=false
+HAS_BUILD=false
 
 if find . -type d -name "__pycache__" -not -path "*/venv/*" -not -path "*/.venv/*" 2>/dev/null | grep -q .; then
     HAS_PYCACHE=true
@@ -41,6 +42,16 @@ if find . -type d -name "__pycache__" -not -path "*/venv/*" -not -path "*/.venv/
 fi
 if [ -d ".pytest_cache" ]; then
     HAS_PYTEST_CACHE=true
+    HAS_DEPENDENCIES=true
+fi
+if find . -type d -name "*.egg-info" -not -path "*/venv/*" -not -path "*/.venv/*" 2>/dev/null | grep -q .; then
+    HAS_EGGINFO=true
+    HAS_DEPENDENCIES=true
+fi
+# NOTE: dist/ is intentionally preserved — it contains the built wheel (.whl)
+# Only remove build/ (intermediate build artifacts), not dist/
+if [ -d "build" ]; then
+    HAS_BUILD=true
     HAS_DEPENDENCIES=true
 fi
 
@@ -54,10 +65,12 @@ if [ "$HAS_DEPENDENCIES" = false ]; then
     CURRENT_LINES=$(find . -type f \
         -not -path "*/.git/*" \
         -not -path "*/__pycache__/*" \
+        -not -path "*/dist/*" \
         -exec wc -l {} + 2>/dev/null | tail -n 1 | awk '{print $1}')
     CURRENT_FILES=$(find . -type f \
         -not -path "*/.git/*" \
         -not -path "*/__pycache__/*" \
+        -not -path "*/dist/*" \
         2>/dev/null | wc -l)
 
     echo -e "${CYAN}Current state (core only):${NC}"
@@ -73,10 +86,12 @@ echo -e "${YELLOW}📊 Current state (EXPANDED — with dependencies):${NC}"
 
 INITIAL_LINES=$(find . -type f \
     -not -path "*/.git/*" \
+    -not -path "*/dist/*" \
     -exec wc -l {} + 2>/dev/null | tail -n 1 | awk '{print $1}')
 
 INITIAL_FILES=$(find . -type f \
     -not -path "*/.git/*" \
+    -not -path "*/dist/*" \
     2>/dev/null | wc -l)
 
 INITIAL_PY=$(find . -name "*.py" 2>/dev/null | wc -l)
@@ -102,12 +117,19 @@ if [ "$HAS_PYCACHE" = true ]; then
     echo -e "  • __pycache__/   compiled .pyc files  (${CACHE_FILES} files)"
     TOTAL_TO_REMOVE=$((TOTAL_TO_REMOVE + CACHE_FILES))
 fi
-
 if [ "$HAS_PYTEST_CACHE" = true ]; then
     echo -e "  • .pytest_cache/  test cache"
 fi
+if [ "$HAS_EGGINFO" = true ]; then
+    echo -e "  • *.egg-info/     editable install metadata"
+fi
+if [ "$HAS_BUILD" = true ]; then
+    echo -e "  • build/          setuptools intermediate artifacts"
+fi
 
 echo -e "  ${BOLD}Total to remove: ~${TOTAL_TO_REMOVE} files${NC}"
+echo ""
+echo -e "  ${CYAN}Note: dist/ is preserved (contains built wheel aicli-maxmux-*.whl)${NC}"
 echo ""
 
 # ── Remove venv(s) ────────────────────────────────────────────────────────────
@@ -147,17 +169,17 @@ if [ -d ".pytest_cache" ]; then
     CLEANED=$((CLEANED + 1))
 fi
 
-# egg-info (if any from pip install -e .)
+# egg-info (from pip install -e .) — handles both aicli.egg-info and aicli_maxmux.egg-info
 if find . -type d -name "*.egg-info" -not -path "*/venv/*" -not -path "*/.venv/*" 2>/dev/null | grep -q .; then
     find . -type d -name "*.egg-info" -not -path "*/venv/*" -not -path "*/.venv/*" -exec rm -rf {} + 2>/dev/null || true
     echo -e "${GREEN}✓ Removed *.egg-info directories${NC}"
     CLEANED=$((CLEANED + 1))
 fi
 
-# dist/ build/ from setuptools
-if [ -d "dist" ] || [ -d "build" ]; then
-    rm -rf dist build 2>/dev/null || true
-    echo -e "${GREEN}✓ Removed dist/ and build/ directories${NC}"
+# build/ intermediate artifacts only (NOT dist/ — wheel preserved)
+if [ -d "build" ]; then
+    rm -rf build
+    echo -e "${GREEN}✓ Removed build/ directory${NC}"
     CLEANED=$((CLEANED + 1))
 fi
 
@@ -174,6 +196,7 @@ FINAL_LINES=$(find . -type f \
     -not -path "*/__pycache__/*" \
     -not -path "*/.git/*" \
     -not -path "*/.pytest_cache/*" \
+    -not -path "*/dist/*" \
     -exec wc -l {} + 2>/dev/null | tail -n 1 | awk '{print $1}')
 
 FINAL_FILES=$(find . -type f \
@@ -182,12 +205,14 @@ FINAL_FILES=$(find . -type f \
     -not -path "*/__pycache__/*" \
     -not -path "*/.git/*" \
     -not -path "*/.pytest_cache/*" \
+    -not -path "*/dist/*" \
     2>/dev/null | wc -l)
 
 FINAL_PY=$(find . -name "*.py" \
     -not -path "*/venv/*" \
     -not -path "*/.venv/*" \
     -not -path "*/__pycache__/*" \
+    -not -path "*/dist/*" \
     2>/dev/null | wc -l)
 
 echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
@@ -202,7 +227,7 @@ echo -e "  Python files: ${GREEN}${FINAL_PY}${NC}"
 echo ""
 
 # Reduction analysis
-if [ ! -z "$INITIAL_LINES" ] && [ ! -z "$FINAL_LINES" ] && [ "$INITIAL_LINES" -gt 0 ] 2>/dev/null; then
+if [ -n "$INITIAL_LINES" ] && [ -n "$FINAL_LINES" ] && [ "$INITIAL_LINES" -gt 0 ] 2>/dev/null; then
     REMOVED=$((INITIAL_LINES - FINAL_LINES))
     if [ "$REMOVED" -gt 0 ]; then
         PERCENT=$(echo "scale=1; ($REMOVED * 100) / $INITIAL_LINES" | bc 2>/dev/null || echo "?")
@@ -221,30 +246,38 @@ echo ""
 echo "Project is now RETRACTED — core source only."
 echo ""
 echo "Core files preserved:"
-echo "  aicli/                    ← main package"
-echo "    app.py                  ← CLI entry (307 lines)"
-echo "    config.py               ← config + API key store"
-echo "    printer.py              ← streaming output + rich markdown rendering"
-echo "    tokens.py               ← token estimation"
-echo "    role.py                 ← system role/persona management"
-echo "    integration.py          ← integration helpers (component wiring, mocked)"
-echo "    providers/pipeline.py   ← PROVIDER_MODELS + 5-provider failover engine"
-echo "    providers/registry.py   ← ProviderRegistry: name→class mapping"
-echo "    providers/              ← base, groq, openrouter, gemini, mistral, ollama"
-echo "    db/chat_db.py           ← SQLite CMA"
-echo "    db/crypto.py            ← Fernet encryption"
-echo "    context/manager.py      ← 3-layer CMA (Hot/Warm/ChromaDB RAG cold layer)"
-echo "    context/embeddings.py   ← ChromaDB LocalContext + ChatContextStore"
-echo "    context/retriever.py    ← ChromaDB ContextRetriever unified search"
-echo "    handlers/               ← chat, repl, default, export, agent, index, provider"
-echo "    tools/builtin/shell.py  ← shell E/M/D/A/R"
-echo "    tools/loader.py         ← tool plugin loader"
-echo "  tests/test_aicli.py       ← unit tests (mocks/patches, no live API)"
-echo "  tests/test_integration.py ← integration tests (component wiring, mocked)"
-echo "  tests/conftest.py         ← pytest fixtures (tmp_db, mock_provider, env cleanup)"
+echo "  aicli/                      ← main package"
+echo "    app.py                    ← CLI entry (aicli.app:main)"
+echo "    config.py                 ← config + API key store"
+echo "    printer.py                ← streaming output + rich markdown rendering"
+echo "    tokens.py                 ← token estimation (tiktoken cl100k_base)"
+echo "    role.py                   ← system role/persona management"
+echo "    image_utils.py            ← multimodal image support (--image flag)"
+echo "    integration.py            ← integration helpers"
+echo "    web.py                    ← web search backends (6-chain)"
+echo "    graph_server.py           ← session graph server (aicli graph)"
+echo "    tui.py                    ← Textual TUI (aicli tui)"
+echo "    providers/pipeline.py     ← PROVIDER_MODELS + 5-provider failover engine"
+echo "    providers/registry.py     ← ProviderRegistry: name→class mapping"
+echo "    providers/                ← base, groq, openrouter, gemini, mistral, ollama"
+echo "    db/chat_db.py             ← SQLite CMA"
+echo "    db/crypto.py              ← Fernet encryption"
+echo "    context/manager.py        ← 3-layer CMA (Hot/Warm/ChromaDB RAG cold)"
+echo "    context/embeddings.py     ← ChromaDB LocalContext + ChatContextStore"
+echo "    context/retriever.py      ← ChromaDB ContextRetriever unified search"
+echo "    handlers/                 ← chat, repl, default, export, agent, index,"
+echo "                                 provider, code_runner"
+echo "    tools/builtin/shell.py    ← shell E/M/D/A/R"
+echo "    tools/builtin/read_file.py ← read file tool"
+echo "    tools/loader.py           ← tool plugin loader"
+echo "  tests/test_aicli.py         ← unit tests"
+echo "  tests/test_integration.py   ← integration tests"
+echo "  tests/test_tui_pure.py      ← TUI pure logic tests"
+echo "  tests/test_graph_server.py  ← graph server tests"
+echo "  tests/conftest.py           ← pytest fixtures"
+echo "  dist/                       ← built wheel (preserved)"
 echo "  requirements.txt"
 echo "  pyproject.toml"
-echo "  .github/workflows/test.yml  ← CI pipeline"
 echo ""
 echo "To expand again: ./expand.sh"
 echo ""

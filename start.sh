@@ -3,7 +3,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [ -f "$SCRIPT_DIR/venv/bin/activate" ]; then
+if [[ -z "$VIRTUAL_ENV" ]] && [ -f "$SCRIPT_DIR/venv/bin/activate" ]; then
     source "$SCRIPT_DIR/venv/bin/activate"
 fi
 
@@ -33,14 +33,14 @@ echo "  Firefox→ bot-right  (${TUI_W},${HALF_H}  ${QTR_W}x${HALF_H})"
 # ── 1. Launch TUI ─────────────────────────────────────────────────────────────
 gnome-terminal \
     --title="aicli — TUI" \
-    -- bash --login -c "cd $SCRIPT_DIR && $ACTIVATE && aicli tui; exec bash" &
+    -- bash --login -c "$ACTIVATE && cd $SCRIPT_DIR && aicli tui; exec bash" &
 
 sleep 1.0
 
 # ── 2. Launch Graph terminal ──────────────────────────────────────────────────
 gnome-terminal \
     --title="aicli — Graph" \
-    -- bash --login -c "cd $SCRIPT_DIR && $ACTIVATE && aicli graph; exec bash" &
+    -- bash --login -c "$ACTIVATE && cd $SCRIPT_DIR && aicli graph; exec bash" &
 
 sleep 1.5
 

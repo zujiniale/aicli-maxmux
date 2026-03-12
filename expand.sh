@@ -54,8 +54,10 @@ if [ "$ALREADY_EXPANDED" = true ]; then
     echo "  3. Ask something:    aicli ask \"hello\""
     echo "  4. Named session:    aicli ask -s mysession \"hello\""
     echo "  5. Interactive REPL: aicli repl"
-    echo "  6. Export session:   aicli export mysession > out.md"
-    echo "  7. Run tests:        python -m pytest tests/ -v"
+    echo "  6. Full TUI:         aicli tui"
+    echo "  7. Session graph:    aicli graph"
+    echo "  8. Export session:   aicli export mysession > out.md"
+    echo "  9. Run tests:        python -m pytest tests/ -v"
     echo ""
     echo "To retract: ./retract.sh"
     exit 0
@@ -87,6 +89,7 @@ INITIAL_LINES=$(find . -type f \
     -not -path "*/__pycache__/*" \
     -not -path "*/.git/*" \
     -not -path "*/.pytest_cache/*" \
+    -not -path "*/dist/*" \
     -exec wc -l {} + 2>/dev/null | tail -n 1 | awk '{print $1}')
 
 INITIAL_FILES=$(find . -type f \
@@ -95,12 +98,14 @@ INITIAL_FILES=$(find . -type f \
     -not -path "*/__pycache__/*" \
     -not -path "*/.git/*" \
     -not -path "*/.pytest_cache/*" \
+    -not -path "*/dist/*" \
     2>/dev/null | wc -l)
 
 INITIAL_PY=$(find . -name "*.py" \
     -not -path "*/venv/*" \
     -not -path "*/.venv/*" \
     -not -path "*/__pycache__/*" \
+    -not -path "*/dist/*" \
     2>/dev/null | wc -l)
 
 echo -e "  Lines: ${GREEN}${INITIAL_LINES}${NC}"
@@ -131,36 +136,53 @@ echo -e "${GREEN}✓ All Python dependencies installed${NC}"
 echo ""
 
 # ── Verify required packages ──────────────────────────────────────────────────
+# Each entry: "import_name|display_name|description"
 echo -e "${YELLOW}━━━ Verifying Core Packages ━━━${NC}"
 
-CORE_PKGS=(click cryptography pytest tiktoken)
-CORE_DESCS=("CLI framework" "Fernet key encryption" "Test runner" "Exact token counting")
+CORE_PKGS=(
+    "click|click|CLI framework"
+    "cryptography|cryptography|Fernet key encryption"
+    "pytest|pytest|Test runner"
+    "pytest_asyncio|pytest-asyncio|Async test support"
+    "tiktoken|tiktoken|Exact token counting"
+)
 
 ALL_OK=true
-for i in $(seq 1 ${#CORE_PKGS[@]}); do
-    pkg="${CORE_PKGS[$i]}"
-    DESC="${CORE_DESCS[$i]}"
-    if python -c "import ${pkg//-/_}" 2>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} ${pkg} — ${DESC}"
+for entry in "${CORE_PKGS[@]}"; do
+    IMP="${entry%%|*}"
+    REST="${entry#*|}"
+    PKG="${REST%%|*}"
+    DESC="${REST#*|}"
+    if python -c "import ${IMP}" 2>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} ${PKG} — ${DESC}"
     else
-        echo -e "  ${RED}✗${NC} ${pkg} — ${DESC} — MISSING"
+        echo -e "  ${RED}✗${NC} ${PKG} — ${DESC} — MISSING"
         ALL_OK=false
     fi
 done
 
 echo ""
-echo -e "${CYAN}  Optional packages (active if installed):${NC}"
+echo -e "${CYAN}  Feature packages (active if installed):${NC}"
 
-OPT_PKGS=(keyring chromadb httpx rich)
-OPT_DESCS=("OS keychain storage" "Vector RAG cold layer" "Async HTTP client" "Rich terminal output")
+OPT_PKGS=(
+    "keyring|keyring|OS keychain storage"
+    "httpx|httpx|Async HTTP client"
+    "rich|rich|Rich terminal markdown output"
+    "textual|textual|TUI framework (aicli tui)"
+    "chromadb|chromadb|Vector RAG cold layer"
+    "sentence_transformers|sentence-transformers|RAG embeddings (pip install .[rag])"
+    "socks|pysocks|Tor/SOCKS5 proxy support (pip install .[proxy])"
+)
 
-for i in $(seq 1 ${#OPT_PKGS[@]}); do
-    pkg="${OPT_PKGS[$i]}"
-    DESC="${OPT_DESCS[$i]}"
-    if python -c "import ${pkg//-/_}" 2>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} ${pkg} — ${DESC}"
+for entry in "${OPT_PKGS[@]}"; do
+    IMP="${entry%%|*}"
+    REST="${entry#*|}"
+    PKG="${REST%%|*}"
+    DESC="${REST#*|}"
+    if python -c "import ${IMP}" 2>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} ${PKG} — ${DESC}"
     else
-        echo -e "  ${YELLOW}–${NC} ${pkg} — ${DESC} (not installed)"
+        echo -e "  ${YELLOW}–${NC} ${PKG} — ${DESC} (not installed)"
     fi
 done
 
@@ -175,6 +197,7 @@ fi
 # ── Verify aicli package itself loads ────────────────────────────────────────
 echo -e "${YELLOW}━━━ Verifying aicli Package ━━━${NC}"
 
+# Core modules — must all import cleanly
 MODULES=(
     "aicli"
     "aicli.config"
@@ -182,6 +205,9 @@ MODULES=(
     "aicli.tokens"
     "aicli.role"
     "aicli.integration"
+    "aicli.image_utils"
+    "aicli.web"
+    "aicli.graph_server"
     "aicli.db.chat_db"
     "aicli.db.crypto"
     "aicli.providers.pipeline"
@@ -203,10 +229,10 @@ MODULES=(
     "aicli.handlers.agent"
     "aicli.handlers.index"
     "aicli.handlers.provider"
+    "aicli.handlers.code_runner"
     "aicli.tools.loader"
     "aicli.tools.builtin.shell"
     "aicli.tools.builtin.read_file"
-    "aicli.image_utils"
 )
 
 IMPORT_ERRORS=0
@@ -219,12 +245,21 @@ for mod in "${MODULES[@]}"; do
     fi
 done
 
+# TUI requires textual — soft failure is expected without it
+echo ""
+echo -e "${CYAN}  Optional module imports (require extras):${NC}"
+if python -c "import aicli.tui" 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} aicli.tui"
+else
+    echo -e "  ${YELLOW}–${NC} aicli.tui (requires: pip install textual)"
+fi
+
 echo ""
 
 if [ "$IMPORT_ERRORS" -gt 0 ]; then
     echo -e "${RED}⚠️  ${IMPORT_ERRORS} module(s) failed to import. Run: python -m pytest tests/ -v${NC}"
 else
-    echo -e "${GREEN}✓ All aicli modules import cleanly${NC}"
+    echo -e "${GREEN}✓ All core aicli modules import cleanly${NC}"
 fi
 
 echo ""
@@ -240,10 +275,16 @@ echo ""
 # ── Final stats ───────────────────────────────────────────────────────────────
 FINAL_LINES=$(find . -type f \
     -not -path "*/.git/*" \
+    -not -path "*/dist/*" \
+    -not -path "*/__pycache__/*" \
+    -not -path "*/.pytest_cache/*" \
     -exec wc -l {} + 2>/dev/null | tail -n 1 | awk '{print $1}')
 
 FINAL_FILES=$(find . -type f \
     -not -path "*/.git/*" \
+    -not -path "*/dist/*" \
+    -not -path "*/__pycache__/*" \
+    -not -path "*/.pytest_cache/*" \
     2>/dev/null | wc -l)
 
 FINAL_PY=$(find . -name "*.py" 2>/dev/null | wc -l)
@@ -259,7 +300,7 @@ echo -e "  Total files:  ${GREEN}${FINAL_FILES}${NC}"
 echo -e "  Python files: ${GREEN}${FINAL_PY}${NC}"
 echo ""
 
-if [ ! -z "$INITIAL_LINES" ] && [ "$INITIAL_LINES" -gt 0 ] 2>/dev/null; then
+if [ -n "$INITIAL_LINES" ] && [ "$INITIAL_LINES" -gt 0 ] 2>/dev/null; then
     ADDED=$((FINAL_LINES - INITIAL_LINES))
     if [ "$ADDED" -gt 0 ]; then
         RATIO=$(echo "scale=1; $FINAL_LINES / $INITIAL_LINES" | bc 2>/dev/null || echo "?")
@@ -281,8 +322,10 @@ echo "  2. Set API key:      aicli config set-key groq"
 echo "  3. Ask something:    aicli ask \"hello\""
 echo "  4. Named session:    aicli ask -s mysession \"hello\""
 echo "  5. Interactive REPL: aicli repl"
-echo "  6. Export session:   aicli export mysession > out.md"
-echo "  7. Run tests:        python -m pytest tests/ -v"
+echo "  6. Full TUI:         aicli tui"
+echo "  7. Session graph:    aicli graph"
+echo "  8. Export session:   aicli export mysession > out.md"
+echo "  9. Run tests:        python -m pytest tests/ -v"
 echo ""
 echo "Provider failover order: Groq → OpenRouter → Gemini → Mistral → Ollama"
 echo ""
