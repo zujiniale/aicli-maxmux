@@ -1,3 +1,4 @@
+from aicli.__version__ import __version__
 #!/usr/bin/env python3
 """
 app.py — aicli: A free, private, async CLI AI tool.
@@ -65,7 +66,7 @@ from .handlers.agent import _agent
 
 @click.group(invoke_without_command=True)
 @click.pass_context
-@click.version_option(version="1.4.0", prog_name="aicli")
+@click.version_option(version=__version__, prog_name="aicli")
 def cli(ctx):
     """aicli — Free, private, async CLI AI. Run 'aicli ask \"your prompt\"' to start."""
     if ctx.invoked_subcommand is None:

@@ -12,3 +12,8 @@ retractedPROJECT_MAP.txt
 ~/.config/aicli/
 *.png
 *.png
+__pycache__/
+*.pyc
+*.pyo
+exports/
+aicli/*.session
