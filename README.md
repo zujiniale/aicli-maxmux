@@ -1,6 +1,6 @@
 # aicli-maxmux
 
-![Version](https://img.shields.io/badge/version-1.5.1-ff4488) ![Tests](https://img.shields.io/badge/tests-193%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.10%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80)
+![Version](https://img.shields.io/badge/version-1.5.4-ff4488) ![Tests](https://img.shields.io/badge/tests-669%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.11%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80) ![Lite](https://img.shields.io/badge/lite%20mode-%7E20MB-a855f7)
 
 A free, private, terminal-native AI CLI with multi-provider failover, persistent memory,
 web search, vision support, and autonomous agent mode.
@@ -15,32 +15,83 @@ No vendor lock-in. No single point of failure. All keys stored encrypted locally
 | Persistent encrypted conversation memory (SQLite + Fernet) | `aicli chat --session myproject` |
 | Web search with current results | `aicli ask --web "latest news"` |
 | Vision / image analysis | `aicli ask --image screenshot.png "what error?"` |
-| Shell command generation + execution | `aicli ask --shell "find large files"` |
+| Shell command generation + execution | `aicli cmd "find large files"` |
 | Autonomous multi-step agent | `aicli agent "set up a Python project"` |
 | Semantic RAG over chat history | `aicli chat --context` |
 | Session export (Markdown / JSON) | `aicli export mysession > out.md` |
 | Full terminal UI with themes, clipboard, range select | `aicli tui` |
 | Interactive session graph viewer | `aicli graph` |
-| Run generated code in Python / Bash / Node / Ruby | `aicli ask --code --run --language bash "..."` |
+| Run generated code in Python / Bash / Node / Ruby | `aicli code "..." --run --language bash` |
 | Plugin system — drop `.py` files to extend aicli | `aicli plugin list` |
 | Encrypted key storage, no shell exports | `aicli config set TAVILY_API_KEY tvly-xxxx` |
 | Tor / proxy support | `aicli config set AICLI_PROXY socks5://127.0.0.1:9050` |
+| **Quick shell command shorthand** | `aicli cmd "kill process on port 3000" --run` |
+| **Quick code generation shorthand** | `aicli code "fibonacci" --run` |
+| **Quiet / scriptable output** | `aicli ask -q "what is my IP"` |
+| **Shell hotkey (Ctrl+G)** | `aicli config install-shell` |
+| **Lite mode (~20MB, no RAG/TUI)** | `pip install aicli-maxmux[lite]` |
+| **Vim-style TUI navigation** | `j/k` scroll · `G/g` top/bottom · `/` search · `dd` delete |
+| **Graph node tags + filtering** | Tag bar in graph viewer, filter by tag |
+| **Obsidian export** | `aicli export mysession --obsidian > vault/note.md` |
+| **Local HTTP API** | `aicli serve` |
+| **MCP server (Claude Desktop)** | `aicli mcp` · stdio + SSE · 4 tools · 2 resources |
 
 ## Install
 
 ```bash
+# Full install — all features (~468MB with deps)
+pip install aicli-maxmux[all]
+aicli setup
+
+# Lite install — core only, no RAG, no TUI (~20MB)
+pip install aicli-maxmux[lite]
+aicli-lite ask "hello"
+
+# Minimal (just the package, add extras later)
 pip install aicli-maxmux
+```
+
+### One-liner bootstrap
+```bash
+bash <(curl -sSL https://raw.githubusercontent.com/YOUR_USER/aicli/main/install.sh)
+# Lite variant:
+bash <(curl -sSL https://raw.githubusercontent.com/YOUR_USER/aicli/main/install.sh) lite
+```
+
+### From source
+```bash
+git clone https://github.com/YOUR_USER/aicli && cd aicli
+./expand.sh          # creates venv, installs all deps + optional extras
+source venv/bin/activate
+aicli setup
 ```
 
 ## Quick Start
 
 ```bash
-# Set at least one API key
+# First-time interactive setup (sets all API keys)
+aicli setup
+
+# Or set keys manually
 aicli config set-key groq        # fastest — free at console.groq.com
 aicli config set-key openrouter  # vision support — free at openrouter.ai
 
 # Ask something
 aicli ask "explain async/await in Python"
+
+# Quick shell command (new shorthand)
+aicli cmd "find all files larger than 100MB"
+aicli cmd "kill process on port 3000" --run
+
+# Quick code generation (new shorthand)
+aicli code "write a merge sort in Python"
+aicli code "fibonacci function" --run
+
+# Quiet / scriptable output
+aicli ask -q "what is today's date"
+
+# Install shell hotkey (Ctrl+G → generates commands in your buffer)
+aicli config install-shell
 
 # Web search (current results)
 aicli config set TAVILY_API_KEY tvly-xxxx   # free at app.tavily.com
@@ -101,6 +152,22 @@ aicli ask --code --run "prompt"       # generate + run code (Python default)
 aicli ask --code --run --language bash "prompt"   # run as bash
 aicli ask --code --run --language node "prompt"   # run as node.js
 aicli ask --code --run --timeout 60 "prompt"      # custom timeout (seconds)
+aicli ask --lite "prompt"             # lite mode: skip RAG/ChromaDB init
+aicli ask --quiet "prompt"            # quiet mode: raw output only
+aicli ask -q "prompt"                 # quiet shorthand (great for scripting)
+
+aicli cmd "prompt"                    # quick shell command (shorthand: ask --shell)
+aicli cmd "prompt" --run              # generate + execute immediately
+aicli cmd "prompt" --dry-run          # print command only, no menu
+aicli cmd "prompt" --lite             # lite + shell
+
+aicli code "prompt"                   # quick code generation (shorthand: ask --code)
+aicli code "prompt" --run             # generate + execute
+aicli code "prompt" --run --language bash   # run as bash
+aicli code "prompt" --run --language node   # run as node.js
+aicli code "prompt" --quiet           # raw code output only
+
+aicli setup                           # interactive first-time setup wizard
 
 aicli chat --session NAME             # persistent conversation
 aicli repl                            # interactive REPL
@@ -109,12 +176,16 @@ aicli agent --dry-run "task"          # show plan without executing
 
 aicli export SESSION > out.md         # export to markdown
 aicli export SESSION --format json    # export to JSON
+aicli export SESSION --obsidian > note.md          # Obsidian-compatible (YAML + callouts)
+aicli export SESSION --obsidian --include-summary -o ~/vault/SESSION.md
 
 aicli config set KEY VALUE            # store any key encrypted
 aicli config get KEY                  # read stored key (masked)
 aicli config set-key PROVIDER         # interactive key entry
 aicli config show                     # show all config + env vars
 aicli config keys                     # show which providers have keys
+aicli config install-shell            # install Ctrl+G shell hotkey (auto-detects zsh/bash)
+aicli config install-shell --shell zsh --hotkey "^L"   # custom shell + hotkey
 
 aicli provider status                 # show provider availability
 aicli provider test groq              # test a specific provider
@@ -122,6 +193,15 @@ aicli session list                    # list all sessions
 aicli session show NAME               # show session messages
 aicli session delete NAME             # delete a session
 aicli index PATH                      # index files for RAG
+
+aicli serve                           # start local HTTP API (default: localhost:8765)
+aicli serve --port 9000               # custom port
+aicli serve --host 0.0.0.0            # expose to network (use with caution)
+aicli serve --quiet                   # suppress startup message
+
+aicli mcp                             # start MCP server (stdio, for Claude Desktop)
+aicli mcp --transport sse             # SSE transport (browser/network clients)
+aicli tag SESSION tag1,tag2           # tag a session (persisted to graph_links.json)
 
 aicli graph                           # session graph viewer (browser)
 aicli graph --port 8080               # custom port
@@ -175,7 +255,89 @@ aicli tui --no-history           # open without loading past messages
 | **Ctrl+Enter** | Insert newline (multiline messages) |
 | **Esc** | Clear range select |
 
+### Vim Navigation (when input not focused)
+
+| Key | Action |
+|-----|--------|
+| **j** | Scroll chat down |
+| **k** | Scroll chat up |
+| **G** | Jump to bottom |
+| **g** | Jump to top |
+| **/*** | Focus session search |
+| **dd** | Delete session (press d twice) |
+
 Requires: `pip install textual`
+
+## MCP Server (Claude Desktop)
+
+```bash
+aicli mcp                    # stdio transport — use with Claude Desktop
+aicli mcp --transport sse    # SSE transport — browser / network clients
+```
+
+Exposes aicli as a Model Context Protocol server so Claude Desktop can call your local AI pipeline, manage sessions, and tag conversations.
+
+**Claude Desktop config** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "aicli": { "command": "aicli", "args": ["mcp"] }
+  }
+}
+```
+
+| Tool | Description |
+|------|-------------|
+| `ask` | Full AI prompt via provider pipeline |
+| `cmd` | Shell command generation (auto-strips fences) |
+| `code` | Code generation (correct JS/TS/Node.js casing) |
+| `tag` | Tag a session — merges, never overwrites |
+
+| Resource | URI |
+|----------|-----|
+| Session list | `sessions://list` |
+| Session messages | `sessions://{session_id}` |
+
+## Local HTTP API (`aicli serve`)
+
+```bash
+aicli serve                    # start on localhost:8765
+aicli serve --port 9000        # custom port
+aicli serve --quiet            # suppress startup banner
+```
+
+Exposes aicli as a local REST API for scripting, tool integration, and MCP-style access.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/ask` | Single-shot prompt |
+| POST | `/ask/shell` | Shell command generation |
+| POST | `/ask/code` | Code generation |
+| GET | `/sessions` | List all sessions |
+| GET | `/sessions/:id` | Get session messages |
+| GET | `/health` | Health check + provider status |
+| GET | `/providers` | Provider availability |
+
+**Request body (POST /ask):**
+```json
+{ "prompt": "explain async/await", "web": false, "lite": false, "model": null }
+```
+
+**Example:**
+```bash
+# Ask
+curl -s http://localhost:8765/ask \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "what is 2+2"}'
+
+# Shell command
+curl -s http://localhost:8765/ask/shell \
+  -d '{"prompt": "find all log files"}' \
+  -H "Content-Type: application/json"
+
+# Health check
+curl -s http://localhost:8765/health | jq .
+```
 
 ## Session Graph
 
@@ -186,6 +348,8 @@ aicli graph --no-browser     # headless use
 ```
 
 An interactive D3 force-directed graph that auto-loads all your exported sessions as nodes. Create links between sessions, add notes, and explore connections.
+
+**Node tags:** Click any node → Tags field → enter comma-separated tags → Save. Tags appear as `#tag` labels under nodes. Filter the graph by tag using the tag bar at the top — click a tag chip or type in the filter box.
 
 **Browser shortcuts:** `L` link mode · `R` reload · `Esc` cancel · double-click to edit · hover link + click to delete
 
@@ -238,29 +402,66 @@ Tor/proxy support works out of the box — Tavily is used as the primary backend
 - No telemetry, no cloud sync, no ads
 - Tor/proxy support: `aicli config set AICLI_PROXY socks5://127.0.0.1:9050`
 
+## Install Modes
+
+| Mode | Command | Size | RAG | TUI | Hotkey |
+|------|---------|------|-----|-----|--------|
+| **Lite** | `pip install aicli-maxmux[lite]` | ~20MB | ✗ | ✗ | ✓ |
+| **Full** | `pip install aicli-maxmux[all]` | ~468MB | ✓ | ✓ | ✓ |
+| **Dev** | `pip install aicli-maxmux[dev]` | ~468MB+ | ✓ | ✓ | ✓ |
+
+Lite mode uses `aicli-lite` as the entry point and sets `AICLI_LITE=1` automatically.
+All commands work in lite mode except `--context` (RAG) and `aicli tui`.
+
+## Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `AICLI_LITE=1` | Enable lite mode globally (skip RAG/ChromaDB init) |
+| `AICLI_QUIET=1` | Enable quiet mode globally (raw output, no chrome) |
+| `AICLI_PROVIDER_CHAIN` | Override provider order (e.g. `gemini,ollama`) |
+| `AICLI_CONFIG_DIR` | Override config directory (default: `~/.config/aicli`) |
+| `AICLI_{PROVIDER}_KEY` | Set API key via env (CI/CD friendly) |
+| `TAVILY_API_KEY` | Tavily web search key (optional, 1000/mo free) |
+| `AICLI_PROXY` | Proxy/Tor (e.g. `socks5://127.0.0.1:9050`) |
+
 ## Requirements
 
-- Python 3.10+
-- Optional: `pip install textual` for TUI (`aicli tui`)
-- Optional: `pip install pysocks` for Tor/SOCKS5 support
+- Python 3.11+
+- Optional: `pip install aicli-maxmux[all]` for RAG + TUI
+- Optional: `pip install aicli-maxmux[lite]` for minimal footprint (~20MB)
 - Optional: `sudo apt install xclip` for TUI clipboard on Linux (Ctrl+Y)
 
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
-**Latest: v1.5.1** — TUI send fixed · ▶ send button · Enter=send · Ctrl+Enter=newline · taller input bar · F7 graph URL fix · summarize fix
+**Latest: v1.5.4** — MCP server (Claude Desktop) · `aicli tag` · 669 tests · 467 static checks · pytest suite ~30s · `aicli cmd` · `aicli code` · `--quiet/-q` · shell hotkey · lite mode · `aicli setup` · `aicli serve` HTTP API · vim nav in TUI (`j/k/G/g/dd//`) · Obsidian export (`--obsidian`) · graph node tags + filtering · lazy ChromaDB init
 
 ## Roadmap
 
 | Version | Feature | Status |
 |---------|---------|--------|
-| v1.5.x | Graph node tags + filtering | 📋 Scoped |
-| v1.5.x | `aicli serve` local HTTP API | 📋 Scoped |
-| v1.5.x | Vim-style TUI navigation (`j/k`, `/`, `dd`) | 📋 Scoped |
-| v1.5.x | Missing tests: `TestTUI`, `TestGraphServer`, `TestWebSearch` | 📋 Scoped |
-| v1.6.x | Obsidian export (`[[wikilinks]]`) | 📋 Scoped |
-| v2.0.x | MCP server (Claude Desktop integration) | 📋 Scoped |
+| v1.5.3 | `aicli cmd` shell shorthand | ✅ Done |
+| v1.5.3 | `aicli code` code shorthand | ✅ Done |
+| v1.5.3 | `--quiet / -q` mode | ✅ Done |
+| v1.5.3 | Shell hotkey (`aicli config install-shell`) | ✅ Done |
+| v1.5.3 | Lite mode + `aicli-lite` entry point | ✅ Done |
+| v1.5.3 | `aicli setup` wizard | ✅ Done |
+| v1.5.3 | `aicli serve` local HTTP API | ✅ Done |
+| v1.5.3 | Vim navigation in TUI (`j/k/G/g/dd//`) | ✅ Done |
+| v1.5.3 | Obsidian export (`--obsidian`) | ✅ Done |
+| v1.5.3 | Graph node tags + tag filtering | ✅ Done |
+| v1.5.3 | Tests: `TestServe`, `TestWebSearch`, `TestNewCommands`, `TestVimNav`, `TestNodeTags`, `TestObsidianExport` | ✅ Done |
+| v1.5.4 | MCP server (Claude Desktop integration) | ✅ Done |
+| v1.5.4 | `aicli tag` CLI shorthand | ✅ Done |
+| v1.5.4 | 669 passing tests + 467 static checks | ✅ Done |
+| v1.5.x | `aicli serve --daemon` (background mode + PID file) | 📋 Scoped |
+| v1.5.x | `aicli history search QUERY` | 📋 Scoped |
+| v1.5.x | `aicli stats` (token counts, cost estimate) | 📋 Scoped |
+| v1.5.x | Missing TUI widget tests (`TestTUI` live render) | 📋 Scoped |
+| v1.5.x | MCP `_tool_ask` with RAG context (vs fixed 10-message window) | 📋 Scoped |
+| v2.0.x | Windows shell integration (`shell_integration.ps1`) | 📋 Scoped |
 
 ## License
 

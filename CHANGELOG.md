@@ -4,6 +4,212 @@ All notable changes to aicli-maxmux are documented here.
 
 ---
 
+## [1.5.4] — 2026-03-16
+
+### Added
+
+#### MCP Server (`handlers/mcp_server.py`) — 703 lines
+- **`aicli mcp`** — new top-level command, starts a Model Context Protocol server for Claude Desktop integration
+  - `aicli mcp` — stdio transport (default, for Claude Desktop `mcpServers` config)
+  - `aicli mcp --transport sse` — SSE transport for browser/network clients
+- **4 MCP tools** exposed to Claude Desktop:
+  - `ask` — full AI prompt via provider pipeline (`prompt`, `session_id`, `model`)
+  - `cmd` — shell command generation with fence-stripping (`prompt`, `dry_run`)
+  - `code` — code generation with correct language casing (`prompt`, `language`)
+  - `tag` — session tag management, merges without overwriting (`session_id`, `tags`)
+- **2 MCP resources**:
+  - `sessions://list` — all sessions with metadata
+  - `sessions://{session_id}` — full message history for a session
+- **Protocol**: JSON-RPC 2.0, `PROTOCOL_VERSION = "2024-11-05"` (MCP spec)
+- **`_LANG_DISPLAY` dict** — correct casing for JavaScript, TypeScript, Node.js (not capitalized)
+- **stdio transport**: `sys.stdin` → JSON-RPC → `sys.stdout.buffer` (avoids `asyncio.BaseProtocol` misuse)
+- **SSE transport**: `HTTPServer` + `queue.SimpleQueue` (thread-safe; not `asyncio.Queue`)
+
+**Claude Desktop config:**
+```json
+{"mcpServers": {"aicli": {"command": "aicli", "args": ["mcp"]}}}
+```
+
+#### `aicli tag` command (`app.py`)
+- **`aicli tag SESSION TAGS`** — tag a session from the CLI
+  - Resolves session by exact name, UUID prefix, or `startswith` fallback
+  - Merges new tags into `graph_links.json` without overwriting existing tags
+  - Handles `JSONDecodeError` gracefully
+
+### Fixed
+
+#### `app.py`
+- **Lazy import shadow bugs (3)**: `CONFIG_DIR`, `run_serve`, and `CONFIG_DIR` in `tag()` were re-imported inside function bodies, silently defeating `patch()` in tests. All moved to module-level imports.
+- **Duplicate `def tag`**: First (weaker) definition removed
+- **Shebang position**: `__version__` import was before shebang; shebang moved to line 1
+
+#### `handlers/mcp_server.py`
+- **`asyncio.BaseProtocol` misuse**: `connect_write_pipe(BaseProtocol, stdout)` replaced with `sys.stdout.buffer`
+- **`asyncio.Queue` in sync thread**: Replaced with `queue.SimpleQueue` in SSE transport
+- **`asyncio.get_event_loop()` deprecated** (Python 3.12+): Replaced with `asyncio.get_running_loop()`
+- **`_server_version()` fallback**: Was hardcoded `"1.5.3"`, corrected to `"1.5.4"`
+- **Triple-fence stripping**: `_tool_cmd` now strips ` ```bash ... ``` ` fences via `re.sub()`
+- **Lone-backtick stripping**: Added `.strip('`')` after fence strip
+- **`_tool_tag` session resolution**: Was using `config.get("data_dir")` (key doesn't exist); now uses `CONFIG_DIR` and resolves by name → UUID → startswith
+- **Empty tool_name guard**: Added `-32602` JSON-RPC error for missing tool name
+- **Language casing**: `language.capitalize()` produced `Javascript`; replaced with `_LANG_DISPLAY` dict
+
+#### `handlers/serve.py`
+- **`load_config()` + `get_role()` not mocked in tests**: Both now patched in test fixtures; were hitting real keyring/config files and returning 500
+
+#### `web.py`
+- **`_tavily_search` alias**: Added `_tavily_search = _search_tavily` at module level for test patchability
+
+#### `pyproject.toml`
+- `pytest` / `pytest-asyncio` confirmed dev-only (not in core deps)
+- `asyncio_mode = "auto"` confirmed present
+- `[rag]`, `[proxy]`, `[mcp]` extras added/confirmed
+
+### Tests
+
+New and updated test suites (`tests/` — all passing):
+
+- **`test_mcp_server.py`** (70 tests, 13 classes) — complete JSON-RPC dispatch, all 4 tools, 2 resources, edge cases, transport constants, language name casing, fence stripping, server version semver
+- **`test_comprehensive.py`** (245 tests, 22 classes) — master regression suite covering every bug S1-1 through V3-4, all CLI commands, all flags, all MCP protocol paths, env var mirrors, shell scripts
+- **`tests/conftest.py`** — session-scoped `aicli_cli` fixture (import once per run), `_BindingStub` stub (no async GC warnings), `slow`/`fast`/`serve` pytest markers, module-level `aicli.app` pre-warm
+- **`run_tests.py`** — 467 static checks across 32 phases, `--time` flag, runs in 0.15s
+- **Bug fixes in existing tests**:
+  - `test_comprehensive.py`: `inspect.getsource(cmd)` → `.callback` for Click commands
+  - `test_tui_pure.py`: `HotkeyInput._on_key` → `on_key`; `str(BINDINGS)` → `getsource` text search
+  - `test_new_commands.py`: `getpass.getpass` mocked; `sys.stdin` mocked; `ContextRetriever` patch path fixed; `AsyncMock(return_value=aiter(...))` anti-pattern replaced with proper async generators
+  - `test_serve.py`: Hardcoded ports (18801–18807) → `_free_port()` OS-assigned; `load_config` + `get_role` patched; `pytestmark = pytest.mark.slow`
+  - `test_web_search.py`: All 6 backends now patched in every test (3 tests were hitting real network, causing 166s slowdown)
+  - `test_graph_server.py`: 7× `time.sleep(0.05/0.1)` → `_wait_for_port()` socket polling
+
+**Total tests: 669 passing** (up from 354 after v1.5.3)  
+**Static checks: 467/467** (`python3 run_tests.py`)  
+**Full suite runtime: ~30s** (down from 3+ minutes; 166s web search timeouts eliminated)
+
+---
+
+## [1.5.3] — 2026-03-15
+
+### Added
+
+#### CLI (`app.py`, `handlers/default.py`)
+- **`aicli cmd`** — new top-level command, shorthand for `ask --shell`
+  - `aicli cmd "find all files larger than 100MB"`
+  - `aicli cmd "kill process on port 3000" --run` — execute immediately, skip menu
+  - `aicli cmd "list docker containers" --dry-run` — print only, no menu
+  - Supports `--lite` and `--quiet` flags
+- **`aicli code`** — new top-level command, shorthand for `ask --code`
+  - `aicli code "write a merge sort in Python"`
+  - `aicli code "fibonacci function" --run` — generate + execute
+  - `aicli code "parse CSV" --run --language bash` — run as bash
+  - Supports `--run`, `--language`, `--max-retries`, `--timeout`, `--lite`, `--quiet`
+- **`--quiet / -q` flag** on `ask` and `code`
+  - Suppresses provider footer, web search status messages, and all info chrome
+  - Raw output only — ideal for shell scripting and piping: `aicli ask -q "..." > out.txt`
+  - Also available via `AICLI_QUIET=1` environment variable
+- **`aicli setup`** — interactive first-time setup wizard
+  - Walks through all four providers with masked key entry
+  - Skips providers that are already configured
+  - Prints quick-start summary and hotkey install hint on completion
+- **`aicli config install-shell`** — install shell hotkey integration
+  - Auto-detects `zsh` or `bash` from `$SHELL`; override with `--shell zsh|bash`
+  - Configurable hotkey via `--hotkey` (default: `Ctrl+G = ^G`)
+  - Appends `source` line to `~/.zshrc` or `~/.bashrc`
+  - Hotkey behaviour: pastes AI-generated shell command directly into terminal buffer
+  - Shell integration scripts: `aicli/shell_integration.zsh`, `aicli/shell_integration.bash`
+- **`--lite` flag** on `ask` and `cmd`
+  - Skips RAG/ChromaDB initialization entirely — faster cold start
+  - Also available via `AICLI_LITE=1` environment variable
+- **`aicli-lite` entry point** — separate binary for minimal installs
+  - Sets `AICLI_LITE=1` automatically; no need to pass flag
+  - `pip install aicli-maxmux[lite]` → `aicli-lite ask "hello"` (~20MB install)
+
+#### Local HTTP API (`handlers/serve.py`, `aicli serve`)
+- **`aicli serve`** — new top-level command, starts a local REST API server
+  - Default: `localhost:8765` (does not conflict with graph server on `7337`)
+  - `--port`, `--host`, `--quiet` options
+  - Endpoints: `POST /ask`, `POST /ask/shell`, `POST /ask/code`, `GET /sessions`, `GET /sessions/:id`, `GET /health`, `GET /providers`
+  - Request body: `{"prompt": "...", "web": false, "lite": false, "model": null}`
+  - Shell responses automatically strip backtick fences
+  - CORS header (`Access-Control-Allow-Origin: http://localhost`) for local browser tools
+  - Designed for scripting, MCP integration, and third-party tool access
+
+#### Lite Mode (`pyproject.toml`)
+- **`[lite]` optional extra** — minimal dependency set (~20MB vs ~468MB full)
+  - Includes: `cryptography`, `click`, `tiktoken`, `httpx`, `rich`
+  - Excludes: `chromadb`, `textual`, `sentence-transformers`
+  - Install: `pip install aicli-maxmux[lite]`
+- **`install.sh`** — one-liner bootstrap script
+  - `bash install.sh` — full install
+  - `bash install.sh lite` — lite install
+  - Python version check (3.11+ required)
+
+#### Shell Integration (`aicli/shell_integration.zsh`, `aicli/shell_integration.bash`)
+- Two new integration scripts installed via `aicli config install-shell`
+- `Ctrl+G` in terminal → generates a shell command from current buffer or inline prompt → pastes into buffer
+- Uses `--lite --dry-run` for minimal overhead
+
+#### Vim-style TUI Navigation (`tui.py`)
+- **`j` / `k`** — scroll chat down / up (disabled when prompt input is focused)
+- **`G`** — jump to bottom of chat
+- **`g`** — jump to top of chat
+- **`/`** — focus the session search box
+- **`dd`** — delete session: press `d` twice within 1.5s; auto-cancels on any other key
+- All vim keys guarded by `_is_input_focused()` — won't fire while typing in prompt
+- HelpScreen updated with vim navigation section
+- `_dd_pending` state with `set_timer(1.5, _cancel_dd)` auto-cancel
+
+#### Obsidian Export (`handlers/export.py`)
+- **`aicli export SESSION --obsidian`** — Obsidian-compatible markdown export
+  - YAML frontmatter: `title`, `session_id`, `date`, `created`, `message_count`, `tags`, `description`
+  - Assistant messages wrapped in `> [!assistant]-` callout blocks
+  - Summary (with `--include-summary`) in `> [!summary]+` callout
+  - Auto-summary system messages as `> [!info]-` callouts
+  - Per-message heading anchors (`^msg-N`) for `[[wikilink]]` cross-referencing
+  - `aicli export SESSION --obsidian --include-summary -o ~/vault/SESSION.md`
+
+#### Graph Node Tags + Filtering (`graph_server.py`)
+- **Tag field** in node panel (comma-separated) — persisted to `graph_links.json` `names` dict
+- **Tag bar** in graph UI header — filter input + auto-generated tag chip buttons per tag
+- **`filterByTag()`** — dims non-matching nodes to 18% opacity; shows match count
+- **`clearTagFilter()`** — restores all nodes
+- **`#tag` label** beneath each node (first tag shown)
+- **`POST /api/tags`** endpoint — server-side filter: `{"tag": "python"}` → `{"nodes": [...]}`
+- Tag filter is case-insensitive
+- `GET /api/sessions` now includes `tags: []` per node
+
+### Fixed / Improved
+
+#### Config (`config.py`)
+- **Lazy ChromaDB directory creation**: `CHROMA_DIR.mkdir()` removed from `load_config()` — directory is now only created when RAG is actually initialized in `context/manager.py`
+  - Previously: ChromaDB dir created on every `aicli` invocation (even `aicli --version`)
+  - Now: created on-demand only when `ContextManager.initialize()` runs and chromadb is available
+
+#### Context Manager (`context/manager.py`)
+- `CHROMA_DIR.mkdir(parents=True, exist_ok=True)` moved into `initialize()` cold layer block — created only when RAG actually loads
+
+#### Dependencies (`pyproject.toml`, `requirements.txt`)
+- **Removed `pytest`/`pytest-asyncio` from core `dependencies`** — they are dev tools, not runtime requirements. Were incorrectly listed as install dependencies since v1.0; now correctly in `[dev]` only
+- `requirements.txt` reorganized into sections: lite-compatible / dev-only / full-only
+- Added install mode header with `pip install` examples for each mode
+
+### Tests
+
+New test suites added (`tests/` — all passing):
+
+- **`test_serve.py`** (18 tests) — `TestServeHealth`, `TestServeProviders`, `TestServeAsk`, `TestServeAskShell`, `TestServeSessions`: covers all 7 HTTP endpoints, error cases, provider exhaustion, backtick stripping
+- **`test_web_search.py`** (9 tests) — `TestWebSearch`, `TestWebSearchQueryFormatting`, `TestWebSearchResultFormat`: chain fallback, Tor/SOCKS5 SearXNG skip, network error handling, result injection
+- **`test_new_commands.py`** (28 tests) — `TestCmdCommand`, `TestCodeCommand`, `TestQuietFlag`, `TestLiteFlag`, `TestSetupCommand`, `TestServeCommand`, `TestMainLite`, `TestConfigInstallShell`: all v1.5.3 CLI additions
+- **`test_tui_pure.py`** — extended with 3 new classes (32 tests):
+  - `TestVimNavActionsStructure` (14 tests): ACTIONS entries, DEFAULT_KEYS mappings, no duplicate IDs
+  - `TestVimNavSourceInspection` (14 tests): action methods exist, focus guard, dd state, help screen
+  - `TestVimNavBindingsInSource` (5 tests): BINDINGS list contains j/k/G/g/slash
+  - `TestObsidianExport` (12 tests): frontmatter, callouts, anchors, summary, message content
+- **`test_graph_server.py`** — extended with `TestNodeTags` (10 tests): tag save/load roundtrip, `/api/tags` filter, case-insensitive matching, HTML tag bar/panel/chips presence
+
+Total new tests this release: **~107** (193 existing + 107 new = **~300 passing**)
+
+---
+
 ## [1.5.1] — 2026-03-09
 
 ### Fixed
