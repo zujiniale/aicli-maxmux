@@ -1,6 +1,6 @@
 # aicli-maxmux
 
-![Version](https://img.shields.io/badge/version-1.5.4-ff4488) ![Tests](https://img.shields.io/badge/tests-669%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.11%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80) ![Lite](https://img.shields.io/badge/lite%20mode-%7E20MB-a855f7)
+![Version](https://img.shields.io/badge/version-1.5.7-ff4488) ![Tests](https://img.shields.io/badge/tests-752%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.11%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80) ![Lite](https://img.shields.io/badge/lite%20mode-%7E20MB-a855f7)
 
 A free, private, terminal-native AI CLI with multi-provider failover, persistent memory,
 web search, vision support, and autonomous agent mode.
@@ -35,20 +35,38 @@ No vendor lock-in. No single point of failure. All keys stored encrypted locally
 | **Obsidian export** | `aicli export mysession --obsidian > vault/note.md` |
 | **Local HTTP API** | `aicli serve` |
 | **MCP server (Claude Desktop)** | `aicli mcp` · stdio + SSE · 4 tools · 2 resources |
+| **Semantic history search** | `aicli history "query"` — search all past sessions |
+| **Token & message stats** | `aicli stats` · per-session counts · `--top N` |
+| **Background HTTP daemon** | `aicli serve --daemon` · `aicli serve stop` |
+| **Windows shell hotkey (Ctrl+G)** | `aicli config install-shell --shell powershell` |
+| **Atomic version bumping** | `python bump_version.py 1.5.5` |
+| **Context-aware shell hotkey** | Ctrl+G captures tmux scrollback · Ctrl+E auto-fixes last error |
+| **Watch mode (live log AI monitor)** | `tail -f app.log \| aicli ask --watch "alert on ERROR"` |
+| **Multi-file context attach** | `aicli ask -f error.log -f screenshot.png "what happened"` |
+| **Direct invocation** | `aicli "your prompt"` — no subcommand needed, like `sgpt` |
+| **Zero-config start** | Auto-detects `GROQ_API_KEY`, `OPENROUTER_API_KEY` etc. from env |
+| **pipx compatible** | `pipx install "aicli-maxmux[lite]"` — isolated, no venv needed |
 
 ## Install
 
 ```bash
-# Full install — all features (~468MB with deps)
-pip install aicli-maxmux[all]
-aicli setup
+# ── Fastest (lite, ~20MB, isolated) ──────────────────────────────
+pipx install "aicli-maxmux[lite]"
+aicli-lite "hello"               # works immediately if GROQ_API_KEY is set
 
-# Lite install — core only, no RAG, no TUI (~20MB)
-pip install aicli-maxmux[lite]
-aicli-lite ask "hello"
+# ── Standard lite install ─────────────────────────────────────────
+pip install "aicli-maxmux[lite]"
+aicli-lite "hello"
 
-# Minimal (just the package, add extras later)
-pip install aicli-maxmux
+# ── Full install — all features (~468MB with deps) ────────────────
+pip install "aicli-maxmux[all]"
+aicli "hello"                    # direct — no subcommand needed
+
+# ── Zero-config: already have API keys? ──────────────────────────
+# If GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, or MISTRAL_API_KEY
+# are set in your environment, aicli uses them immediately — no setup needed.
+export GROQ_API_KEY="gsk_..."
+aicli "explain async/await"      # works instantly
 ```
 
 ### One-liner bootstrap
@@ -69,14 +87,18 @@ aicli setup
 ## Quick Start
 
 ```bash
-# First-time interactive setup (sets all API keys)
-aicli setup
+# ── If you already have an API key in your environment — just start ──
+# GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY etc. are auto-detected.
+aicli "explain async/await in Python"   # direct — no subcommand, no setup
 
-# Or set keys manually
-aicli config set-key groq        # fastest — free at console.groq.com
-aicli config set-key openrouter  # vision support — free at openrouter.ai
+# ── First time with no keys ──────────────────────────────────────────
+# Get a free Groq key in ~30 seconds: https://console.groq.com/keys
+aicli config set-key groq        # paste key once, encrypted locally
 
-# Ask something
+# ── Or run the interactive setup wizard ──────────────────────────────
+aicli setup                      # auto-detects existing env keys too
+
+# Explicit subcommand form also works
 aicli ask "explain async/await in Python"
 
 # Quick shell command (new shorthand)
@@ -198,10 +220,20 @@ aicli serve                           # start local HTTP API (default: localhost
 aicli serve --port 9000               # custom port
 aicli serve --host 0.0.0.0            # expose to network (use with caution)
 aicli serve --quiet                   # suppress startup message
+aicli serve --daemon                  # run in background (PID saved to ~/.config/aicli/serve.pid)
+aicli serve stop                      # stop background daemon
 
 aicli mcp                             # start MCP server (stdio, for Claude Desktop)
 aicli mcp --transport sse             # SSE transport (browser/network clients)
 aicli tag SESSION tag1,tag2           # tag a session (persisted to graph_links.json)
+
+aicli history "query"                 # semantic search across all past sessions
+aicli history "query" --results 10   # more results
+aicli history "query" --min-score 0.3 # adjust similarity threshold
+
+aicli stats                           # all sessions: message + token counts
+aicli stats --session NAME            # single session detail
+aicli stats --top 5                   # top 5 sessions by message count
 
 aicli graph                           # session graph viewer (browser)
 aicli graph --port 8080               # custom port
@@ -436,7 +468,7 @@ All commands work in lite mode except `--context` (RAG) and `aicli tui`.
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
-**Latest: v1.5.4** — MCP server (Claude Desktop) · `aicli tag` · 669 tests · 467 static checks · pytest suite ~30s · `aicli cmd` · `aicli code` · `--quiet/-q` · shell hotkey · lite mode · `aicli setup` · `aicli serve` HTTP API · vim nav in TUI (`j/k/G/g/dd//`) · Obsidian export (`--obsidian`) · graph node tags + filtering · lazy ChromaDB init
+**Latest: v1.5.7** — context-aware Ctrl+G (tmux scrollback) · Ctrl+E error-fix hotkey · `--watch` streaming log monitor · `--file/-f` multi-file context · LLM-optimal injection order · 703 tests · 530 static checks · v1.5.5: patch fixes (`ContextRetriever` binding, stale `/tmp/` cleanup) · v1.5.4: MCP server · `aicli history` · `aicli stats` · `aicli serve --daemon` · PowerShell Ctrl+G
 
 ## Roadmap
 
@@ -456,12 +488,26 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 | v1.5.4 | MCP server (Claude Desktop integration) | ✅ Done |
 | v1.5.4 | `aicli tag` CLI shorthand | ✅ Done |
 | v1.5.4 | 669 passing tests + 467 static checks | ✅ Done |
-| v1.5.x | `aicli serve --daemon` (background mode + PID file) | 📋 Scoped |
-| v1.5.x | `aicli history search QUERY` | 📋 Scoped |
-| v1.5.x | `aicli stats` (token counts, cost estimate) | 📋 Scoped |
+| v1.5.4 | `aicli serve --daemon` (background mode + PID file) | ✅ Done |
+| v1.5.4 | `aicli history QUERY` (semantic search across sessions) | ✅ Done |
+| v1.5.4 | `aicli stats` (token counts, message counts) | ✅ Done |
+| v1.5.4 | MCP `_tool_ask` with RAG context | ✅ Done |
+| v1.5.4 | Windows shell integration (`shell_integration.ps1`) | ✅ Done |
+| v1.5.4 | `bump_version.py` atomic version update | ✅ Done |
+| v1.5.4 | `aicli config install-shell --shell powershell` | ✅ Done |
+| v1.5.5 | `ContextRetriever` module-level binding — patchable in tests (`app.py`, `mcp_server.py`) | ✅ Done |
+| v1.5.5 | Stale `/tmp/` source path auto-cleanup in `config install-shell` | ✅ Done |
+| v1.5.5 | `test_history_handles_no_chromadb` — `side_effect=ImportError` → `patch to None` fix | ✅ Done |
+| v1.5.5 | Phase 5 config import consolidation (`CHROMA_DIR` merged into single import line) | ✅ Done |
+| v1.5.5 | 490+ static checks · `pathlib.Path.home()` patched in install-shell test | ✅ Done |
+| v1.5.6 | Context-aware Ctrl+G — tmux scrollback injected as `--terminal-context` | ✅ Done |
+| v1.5.6 | Ctrl+E error-fix hotkey — auto-diagnose last failed command (zsh + bash) | ✅ Done |
+| v1.5.6 | `--watch` streaming mode — real-time AI log monitor (`tail -f \| aicli ask --watch`) | ✅ Done |
+| v1.5.6 | `--file/-f` multi-file context — attach any text/log/code file to prompt | ✅ Done |
+| v1.5.6 | LLM-optimal injection order: RAG → TC → files → web | ✅ Done |
+| v1.5.6 | 703 pytest tests · 530 static checks | ✅ Done |
 | v1.5.x | Missing TUI widget tests (`TestTUI` live render) | 📋 Scoped |
-| v1.5.x | MCP `_tool_ask` with RAG context (vs fixed 10-message window) | 📋 Scoped |
-| v2.0.x | Windows shell integration (`shell_integration.ps1`) | 📋 Scoped |
+| v1.5.x | `aicli serve --daemon` Windows port (os.fork is Unix-only) | 📋 Scoped |
 
 ## License
 

@@ -431,6 +431,10 @@ async def _search_tavily(query: str, max_results: int, loop, opener) -> Optional
     return None
 
 
+# Alias for test patchability — tests patch aicli.web._tavily_search
+_tavily_search = _search_tavily
+
+
 # ── Main public API ───────────────────────────────────────────────────────────
 
 async def web_search(query: str, max_results: int = _MAX_RESULTS) -> Optional[str]:

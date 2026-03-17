@@ -39,9 +39,9 @@ aicli is a terminal AI assistant with 5-provider failover, encrypted SQLite
 conversation memory (3-layer CMA: Hot/Warm/ChromaDB RAG), web search (6-backend
 chain), shell command generation, multimodal vision, TUI, session graph viewer,
 code runner, plugin system, REPL mode, session export, and autonomous agent mode.
-Published to PyPI as aicli-maxmux 1.5.1.
+Published to PyPI as aicli-maxmux 1.5.4.
 
-Package:     aicli-maxmux 1.5.1
+Package:     aicli-maxmux 1.5.4
 Entry point: aicli = "aicli.app:main"
 Codebase:    $PY_LINE_COUNT_FMT lines of Python (cloc, $PY_FILES_COUNT files)
 
@@ -67,12 +67,13 @@ MODULE REFERENCE — WHAT EACH FILE DOES
 ROOT
 ────
   app.py              ← (in aicli/) CLI entry point — aicli.app:main
-                         All click commands: ask, chat, repl, index, provider,
-                         export, agent, config, tui, graph, plugin, session,
-                         _provider_test
+                         All click commands: ask, cmd, code, chat, repl, index,
+                         provider, export, agent, config, tui, graph, plugin,
+                         session, serve, mcp, setup, tag, _provider_test
+                         main_lite() entry point (aicli-lite binary)
   __main__.py         ← python -m aicli dispatcher
   __init__.py         ← package init + version re-export
-  __version__.py      ← single source of truth for version string (1.5.1)
+  __version__.py      ← single source of truth for version string (1.5.4)
   config.py           ← AICLI_* env var resolution, API key get/set,
                          Fernet encryption key derivation from machine ID,
                          CHROMA_DIR path for ChromaDB cold layer
@@ -99,11 +100,13 @@ ROOT
                          • FastAPI/uvicorn HTTP server on :7337
                          • D3 force-directed graph of all exported sessions
                          • Link, tag, note nodes in browser
+                         • Node tags: tag field + filter bar + /api/tags endpoint
   tui.py              ← Full terminal UI (aicli tui)
                          • Textual framework (requires: pip install textual)
                          • Sidebar session list, chat panel, input bar
                          • 5 themes: Tokyo Night / Dracula / Gruvbox / Nord / Solarized
                          • F1-F7 + Ctrl shortcuts (see README for full list)
+                         • Vim navigation: j/k scroll, G/g top/bottom, / search, dd delete
 
 PROVIDERS/
 ──────────
@@ -158,7 +161,8 @@ HANDLERS/
                          updates CMA; Ctrl+C → await_pending_summarization()
   repl.py             ← Interactive REPL loop — persists ContextManager across turns
   default.py          ← Default/fallback handler
-  export.py           ← aicli export — dumps session to Markdown or JSON
+  export.py           ← aicli export — dumps session to Markdown, JSON, or Obsidian
+                         • --obsidian: YAML frontmatter + callout blocks + ^msg-N anchors
   agent.py            ← aicli agent — plan/execute/feedback loop
                          • --dry-run to show plan without executing
   index.py            ← aicli index — file + chat indexing for RAG
@@ -166,6 +170,17 @@ HANDLERS/
   code_runner.py      ← aicli ask --code --run — generate + execute code
                          • Supports: Python / Bash / Node / Ruby
                          • --language flag, --timeout flag (default 30s)
+  serve.py            ← aicli serve — local HTTP REST API server
+                         • GET /health, GET /providers, GET /sessions
+                         • POST /ask, POST /ask/shell, POST /ask/code
+                         • DELETE /sessions/{id}
+                         • --port (default 8484), --host (default 127.0.0.1)
+  mcp_server.py       ← aicli mcp — MCP server (Claude Desktop integration)
+                         • stdio transport (default) — JSON-RPC over stdin/stdout
+                         • SSE transport — HTTP + Server-Sent Events on :8766
+                         • Tools: ask, cmd, code, tag
+                         • Resources: sessions://list, sessions://{id}
+                         • Protocol: MCP 2024-11-05 (stdlib only, no extra deps)
   __init__.py
 
 TOOLS/
@@ -183,33 +198,48 @@ TOOLS/
 
 TESTS/
 ──────
-  test_aicli.py       ← Unit tests (mocks/patches, no live API)
-                         Tests: config, crypto, db, providers, tokens, shell
-  test_integration.py ← Integration tests (component wiring, still mocked)
-  test_tui_pure.py    ← TUI pure logic tests (no display, no Textual dependency)
-  test_graph_server.py ← Graph server tests
-  conftest.py         ← pytest fixtures: tmp_db, mock_provider, env cleanup
+  test_aicli.py         ← Unit tests (mocks/patches, no live API)
+                           Tests: config, crypto, db, providers, tokens, shell
+  test_integration.py   ← Integration tests (component wiring, still mocked)
+  test_tui_pure.py      ← TUI pure logic + vim nav + Obsidian export tests
+  test_graph_server.py  ← Graph server tests + node tags
+  test_serve.py         ← HTTP API server tests (aicli serve, 15 tests)
+  test_web_search.py    ← Web search chain tests (9 tests)
+  test_new_commands.py  ← v1.5.3/v1.5.4 CLI additions tests (31 tests)
+  test_mcp_server.py    ← MCP server tests (60 tests — tools, resources, edge cases, JSON-RPC)
+  conftest.py           ← pytest fixtures: tmp_db, mock_provider, env cleanup
   __init__.py
 
 CONFIG FILES
 ────────────
-  pyproject.toml      ← Build config (hatchling), entry point, optional extras:
-                         [full] keyring+httpx+rich+tiktoken
-                         [rag]  chromadb+sentence-transformers
-                         [tui]  textual
+  pyproject.toml      ← Build config (hatchling), entry points:
+                         aicli      = "aicli.app:main"
+                         aicli-lite = "aicli.app:main_lite"
+                         Optional extras:
+                         [lite]  cryptography+click+tiktoken+httpx+rich (~20 MB)
+                         [full]  keyring+httpx+rich+tiktoken
+                         [rag]   chromadb+sentence-transformers
+                         [tui]   textual
                          [proxy] pysocks
-                         [dev]  pytest+ruff+twine+build
-                         [all]  everything
+                         [dev]   pytest+ruff+twine+build
+                         [all]   everything
   requirements.txt    ← Full dependency list with annotations
   CHANGELOG.md        ← Version history
 
 SCRIPTS
 ───────
-  expand.sh           ← Create venv, install deps, verify all modules
-  retract.sh          ← Remove venv + build artifacts (preserves dist/)
-  map_structure.sh    ← Generate this PROJECT_MAP.txt
-  stats_final.sh      ← Detailed project statistics (requires: cloc)
-  start.sh            ← Launch TUI + graph server + Firefox in tiled layout
+  expand.sh               ← Create venv, install deps, verify all modules
+  retract.sh              ← Remove venv + build artifacts (preserves dist/)
+  map_structure.sh        ← Generate this PROJECT_MAP.txt
+  stats_final.sh          ← Detailed project statistics (requires: cloc)
+  start.sh                ← Launch TUI + graph server + Firefox in tiled layout
+  install.sh              ← One-liner bootstrap; supports: bash install.sh lite
+
+SHELL INTEGRATION
+─────────────────
+  aicli/shell_integration.zsh   ← Ctrl+G hotkey for zsh — pipes buffer through aicli
+  aicli/shell_integration.bash  ← Ctrl+G hotkey for bash — pipes buffer through aicli
+                                   Install: aicli config install-shell
 
 EXPORTS/
 ────────
@@ -270,13 +300,21 @@ BUILD ROADMAP — WHAT'S DONE vs. WHAT'S NEXT
   ✅ F7       aicli graph (D3 session graph viewer)           COMPLETE
   ✅ F8       --code --run (code runner, multi-language)      COMPLETE
   ✅ F9       Plugin system (aicli plugin list/run/install)   COMPLETE
+  ✅ v1.5.3   Graph node tags + filtering                     COMPLETE
+  ✅ v1.5.3   aicli serve (local HTTP API, 7 endpoints)       COMPLETE
+  ✅ v1.5.3   Vim-style TUI navigation (j/k, /, dd)          COMPLETE
+  ✅ v1.5.3   Obsidian export ([[wikilinks]])                 COMPLETE
+  ✅ v1.5.3   aicli cmd / aicli code shorthands              COMPLETE
+  ✅ v1.5.3   Lite mode (--lite, aicli-lite, [lite] extra)   COMPLETE
+  ✅ v1.5.3   Shell hotkey integration (Ctrl+G)              COMPLETE
+  ✅ v1.5.3   aicli setup wizard + install.sh bootstrap      COMPLETE
+  ✅ v1.5.4   MCP server (aicli mcp, stdio + SSE)            COMPLETE
+  ✅ v1.5.4   aicli tag SESSION TAG1 TAG2 CLI command        COMPLETE
 
   Roadmap (upcoming):
-  📋 v1.5.x   Graph node tags + filtering
-  📋 v1.5.x   aicli serve (local HTTP API)
-  📋 v1.5.x   Vim-style TUI navigation (j/k, /, dd)
-  📋 v1.6.x   Obsidian export ([[wikilinks]])
-  📋 v2.0.x   MCP server (Claude Desktop integration)
+  📋 v1.6.x   aicli serve --daemon (background mode + pidfile)
+  📋 v1.6.x   aicli history search QUERY (semantic search CLI surface)
+  📋 v1.6.x   aicli stats (token counts, cost estimates, session stats)
 
 EOF
 
@@ -335,13 +373,21 @@ for f in \
     "aicli/handlers/index.py" \
     "aicli/handlers/provider.py" \
     "aicli/handlers/code_runner.py" \
+    "aicli/handlers/serve.py" \
+    "aicli/handlers/mcp_server.py" \
     "aicli/tools/loader.py" \
     "aicli/tools/builtin/shell.py" \
     "aicli/tools/builtin/read_file.py" \
+    "aicli/shell_integration.zsh" \
+    "aicli/shell_integration.bash" \
     "tests/test_aicli.py" \
     "tests/test_integration.py" \
     "tests/test_tui_pure.py" \
     "tests/test_graph_server.py" \
+    "tests/test_serve.py" \
+    "tests/test_web_search.py" \
+    "tests/test_new_commands.py" \
+    "tests/test_mcp_server.py" \
     "tests/conftest.py"; do
     if [ -f "$f" ]; then
         LINES=$(wc -l < "$f" 2>/dev/null || echo "0")
@@ -357,6 +403,10 @@ TOTAL_TESTS=$(grep -c "def test_" \
     tests/test_integration.py \
     tests/test_tui_pure.py \
     tests/test_graph_server.py \
+    tests/test_serve.py \
+    tests/test_web_search.py \
+    tests/test_new_commands.py \
+    tests/test_mcp_server.py \
     2>/dev/null | awk -F: '{sum+=$2} END{print sum+0}')
 
 echo "  Test count:  ${TOTAL_TESTS} passing (all test files)" >> "$OUTPUT_FILE"
@@ -380,5 +430,5 @@ for mod in providers db context handlers tools; do
 done
 echo ""
 echo -e "  Tests: ${GREEN}${TOTAL_TESTS} passing${NC}"
-echo -e "  Version: ${GREEN}1.5.1${NC}"
+echo -e "  Version: ${GREEN}1.5.4${NC}"
 echo ""

@@ -56,6 +56,15 @@ ACTIONS = [
     ("copy_range",     "ctrl+r",  "Copy typed range (type 3-7 then Ctrl+R)"),
     ("help",           "f1",      "Help (this screen)"),
     ("settings",       "ctrl+9",  "Settings"),
+    # ── Vim-style navigation (v1.5.3) ─────────────────────────────────────────
+    ("scroll_down",    "j",       "Scroll chat down (vim)"),
+    ("scroll_up",      "k",       "Scroll chat up (vim)"),
+    ("scroll_bottom",  "G",       "Jump to bottom (vim)"),
+    ("scroll_top",     "g",       "Jump to top (vim)"),
+    ("search_sessions", "/",      "Search sessions (vim)"),
+    ("delete_session_dd", "d",    "Delete session (vim dd — press twice)"),
+    # ── aicli do (v1.5.7) ─────────────────────────────────────────────────────
+    ("do_mode",        "f9",      "aicli do — OS function calling"),
 ]
 
 # CSS is generated dynamically from the active theme (see build_css)
@@ -465,6 +474,13 @@ class HelpScreen(Screen):
             "  Ctrl+R (typed):   type  3-7  in input box, press Ctrl+R",
             "  Esc: cancel any active range selection",
             "",
+            "  ── Vim navigation (when input not focused) ──",
+            "  j / k     scroll chat down / up",
+            "  G         jump to bottom",
+            "  g         jump to top",
+            "  /         focus session search",
+            "  dd        delete current session (press d twice)",
+            "",
             "  ── Session bulk ops (Ctrl+B) ────────────────",
             "  Enter bulk mode, click sessions to select,",
             "  then Ctrl+D=delete  Ctrl+E=export  Ctrl+K=pin",
@@ -707,6 +723,70 @@ class MessageBlock(Static):
             self.styles.border_left = ("none", "transparent")
             self.styles.background  = "#1a1b26"
 
+# ── DoModeScreen — aicli do prompt dialog (F9) ───────────────────────────────
+
+class DoModeScreen(Screen):
+    """Modal dialog for aicli do — OS function calling from the TUI.
+
+    Press F9 to open. Type a natural language task (e.g. "play music and open
+    hacker news"). Press Enter to execute, Escape to cancel.
+
+    The result is shown as an assistant message in the active chat.
+    Toggle Ctrl+Y to switch between auto-confirm and dry-run preview modes.
+    """
+
+    BINDINGS = [
+        Binding("escape",  "cancel",         "Cancel",      priority=True),
+        Binding("enter",   "submit",          "Execute",     priority=True),
+        Binding("ctrl+y",  "toggle_confirm",  "Toggle confirm", priority=True),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._auto_confirm: bool = True   # default: auto-confirm (non-interactive)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="do-modal"):
+            yield Label("⚡ aicli do — OS Function Calling", id="do-title")
+            yield Label(
+                "Type a task for the AI to perform using OS tools:\n"
+                "  'play music and open hacker news'\n"
+                "  'send email to alice@example.com say hi'\n"
+                "  'notify me the build is done'\n"
+                "  'check system memory'\n\n"
+                "Enter=run  Escape=cancel  Ctrl+Y=toggle confirm mode",
+                id="do-hint",
+            )
+            yield Input(placeholder="e.g. play music and open hacker news", id="do-input")
+            yield Label("⚡ Mode: auto-confirm (tools run immediately)", id="do-mode-label")
+
+    def on_mount(self) -> None:
+        self.query_one("#do-input", Input).focus()
+
+    def action_toggle_confirm(self) -> None:
+        """Ctrl+Y — toggle between auto-confirm and dry-run preview."""
+        self._auto_confirm = not self._auto_confirm
+        label = self.query_one("#do-mode-label", Label)
+        if self._auto_confirm:
+            label.update("⚡ Mode: auto-confirm (tools run immediately)")
+        else:
+            label.update("👁  Mode: dry-run preview (shows plan, no execution)")
+
+    def action_submit(self) -> None:
+        prompt = self.query_one("#do-input", Input).value.strip()
+        if not prompt:
+            self.dismiss(None)
+            return
+        # Pass (prompt, auto_confirm) tuple so caller knows which mode was chosen
+        self.dismiss((prompt, self._auto_confirm))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.action_submit()
+
+
 # ── Main App ──────────────────────────────────────────────────────────────────
 
 class AicliTUI(App):
@@ -744,6 +824,13 @@ class AicliTUI(App):
         Binding("escape",  "clear_range",  "Clear", show=False),
         Binding("enter",      "send",    "Send",    show=False, priority=True),
         Binding("ctrl+enter", "newline",  "Newline", show=False),
+        Binding("f9",      "do_mode",     "Do",      priority=True),  # aicli do
+        # ── Vim-style navigation (v1.5.3) ─────────────────────────────────────
+        Binding("j",       "scroll_down",        "↓",       show=False),
+        Binding("k",       "scroll_up",          "↑",       show=False),
+        Binding("G",       "scroll_bottom",      "⤓",       show=False),
+        Binding("g",       "scroll_top",         "⤒",       show=False),
+        Binding("slash",   "search_sessions",    "/",       show=False),
     ]
 
     active_session_id:   reactive[str | None] = reactive(None)
@@ -774,6 +861,8 @@ class AicliTUI(App):
         self._range_mode = False
         self._shift_held  = False
         self._range_picking = False  # True while user is click-picking a range (F2)
+        self._dd_pending = False     # True after first 'd' — waiting for second 'd' (vim dd)
+        self._vim_mode = True        # j/k/G/g active when prompt input is NOT focused
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -1045,6 +1134,52 @@ class AicliTUI(App):
     def action_newline(self) -> None:
         inp = self.query_one("#prompt-input", Input)
         inp.value += "\n"
+
+    def action_do_mode(self) -> None:
+        """F9 — open aicli do prompt dialog for OS function calling."""
+        self.push_screen(DoModeScreen(), self._handle_do_result)
+
+    def _handle_do_result(self, result: tuple | None) -> None:
+        """Callback from DoModeScreen — run the do command and show output in chat.
+
+        result is either None (cancelled) or (prompt, auto_confirm) tuple.
+        """
+        if not result:
+            return
+        prompt, auto_confirm = result
+        if not prompt:
+            return
+        self.run_worker(self._run_do_command(prompt, auto_confirm=auto_confirm), exclusive=False)
+
+    async def _run_do_command(self, prompt: str, *, auto_confirm: bool = True) -> None:
+        """Execute aicli do in a worker thread and display result as a chat message.
+
+        auto_confirm=True  — tools execute immediately (default, non-interactive)
+        auto_confirm=False — dry_run=True, shows the plan without executing
+        """
+        mode_label = "[do]" if auto_confirm else "[do dry-run]"
+        self._append_message("user", f"{mode_label} {prompt}")
+        try:
+            import io
+            import contextlib
+            from aicli.tools.executor import run_do_command
+            output_buf = io.StringIO()
+            with contextlib.redirect_stdout(output_buf):
+                await run_do_command(
+                    prompt_parts=(prompt,),
+                    auto_confirm=auto_confirm,
+                    dry_run=not auto_confirm,   # dry_run when not auto-confirming
+                    quiet=False,
+                    model=None,
+                    lite=False,
+                    role=None,
+                )
+            result = output_buf.getvalue().strip()
+            self._append_message("assistant", result or "(do: no output)")
+        except ImportError:
+            self._append_message("system", "[do] OS tools not available (lite install)")
+        except Exception as exc:
+            self._append_message("system", f"[do error] {exc}")
 
     async def _send_message(self, prompt: str) -> None:
         if not self._pipeline:
@@ -1414,6 +1549,10 @@ class AicliTUI(App):
         except Exception as e: self._append_message("system",f"[Summarize failed: {e}]")
 
     def on_key(self, event) -> None:
+        # Cancel dd-pending on any key that isn't 'd'
+        if self._dd_pending and event.key != "d":
+            self._dd_pending = False
+            self._set_range_status("")
         # Shift tracking — works because on_key fires for modifier-only keypresses
         if event.key in ("shift", "shift+shift"):
             self._shift_held = True
@@ -1457,6 +1596,82 @@ class AicliTUI(App):
         if "shift" in event.key:
             self._shift_held = False
 
+
+    # ── Vim-style navigation (v1.5.3) ──────────────────────────────────────────
+
+    def _is_input_focused(self) -> bool:
+        """Return True if prompt input or session search has focus — vim keys disabled then."""
+        try:
+            focused = self.focused
+            return focused is not None and getattr(focused, "id", "") in (
+                "prompt-input", "session-search"
+            )
+        except Exception:
+            return False
+
+    def action_scroll_down(self) -> None:
+        """j — scroll chat down one step."""
+        if self._is_input_focused():
+            return
+        try:
+            self.query_one("#chat-scroll").scroll_relative(y=3, animate=False)
+        except Exception:
+            pass
+
+    def action_scroll_up(self) -> None:
+        """k — scroll chat up one step."""
+        if self._is_input_focused():
+            return
+        try:
+            self.query_one("#chat-scroll").scroll_relative(y=-3, animate=False)
+        except Exception:
+            pass
+
+    def action_scroll_bottom(self) -> None:
+        """G — jump to bottom of chat."""
+        if self._is_input_focused():
+            return
+        try:
+            self.query_one("#chat-scroll").scroll_end(animate=False)
+        except Exception:
+            pass
+
+    def action_scroll_top(self) -> None:
+        """g — jump to top of chat (gg equivalent — single g for simplicity)."""
+        if self._is_input_focused():
+            return
+        try:
+            self.query_one("#chat-scroll").scroll_home(animate=False)
+        except Exception:
+            pass
+
+    def action_search_sessions(self) -> None:
+        """/ — focus the session search box."""
+        try:
+            self.query_one("#session-search", Input).focus()
+        except Exception:
+            pass
+
+    def action_delete_session_dd(self) -> None:
+        """d — first press arms dd; second press within 1s deletes (vim dd)."""
+        if self._is_input_focused():
+            return
+        if self._dd_pending:
+            # Second d — execute delete
+            self._dd_pending = False
+            self._set_range_status("")
+            self.action_delete()
+        else:
+            # First d — arm and wait
+            self._dd_pending = True
+            self._set_range_status("dd — press d again to delete session  |  any other key cancels")
+            # Auto-cancel after 1.5 seconds
+            self.set_timer(1.5, self._cancel_dd)
+
+    def _cancel_dd(self) -> None:
+        if self._dd_pending:
+            self._dd_pending = False
+            self._set_range_status("")
 
     def action_range_pick(self) -> None:
         """F2: enter click-to-pick range mode. Click start then end message."""

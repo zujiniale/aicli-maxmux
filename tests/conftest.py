@@ -139,3 +139,124 @@ def graph_links_factory(tmp_path):
         return p
 
     return _make
+
+
+# ── Performance: session-scoped imports ───────────────────────────────────────
+#
+# WHY THIS EXISTS:
+# importing aicli.app triggers chromadb, textual, rich, httpx, tiktoken.
+# Without a session fixture each test file reimports the whole stack.
+# With `aicli_cli` below, the import happens once per `pytest` run.
+#
+# USAGE in any test:
+#   def test_something(aicli_cli):
+#       runner = CliRunner()
+#       result = runner.invoke(aicli_cli, ["ask", "--help"])
+
+import sys
+from unittest.mock import MagicMock as _MagicMock
+
+
+def _maybe_stub_textual():
+    """Install MagicMock stubs for textual if not already present.
+
+    Called at conftest load time so test_tui_pure and test_comprehensive
+    can import aicli.tui without textual being installed.
+    The stubs match the real textual API surface used by tui.py.
+    """
+    if "textual" in sys.modules:
+        return  # already loaded (real or existing stub)
+
+    class _Base:
+        def __init__(self, *a, **kw): pass
+    class _App(_Base):
+        CSS = ""
+        BINDINGS = []
+    class _Input(_Base): pass
+    class _Static(_Base): pass
+    class _Screen(_Base): pass
+
+    # Binding stub: plain object with .key — no MagicMock to avoid coroutine GC warnings
+    class _BindingStub:
+        __slots__ = ("key", "action", "description", "show", "priority")
+        def __init__(self, *a, **kw):
+            self.key         = a[0] if a else kw.get("key", "")
+            self.action      = a[1] if len(a) > 1 else kw.get("action", "")
+            self.description = a[2] if len(a) > 2 else kw.get("description", "")
+            self.show        = kw.get("show", True)
+            self.priority    = kw.get("priority", False)
+        def __repr__(self):
+            return f"Binding(key={self.key!r})"
+
+    stubs = {
+        "textual":              _MagicMock(name="textual"),
+        "textual.app":          _MagicMock(name="textual.app", App=_App, ComposeResult=object),
+        "textual.binding":      _MagicMock(name="textual.binding", Binding=_BindingStub),
+        "textual.containers":   _MagicMock(name="textual.containers",
+                                           Horizontal=_Base, Vertical=_Base,
+                                           ScrollableContainer=_Base),
+        "textual.css.query":    _MagicMock(name="textual.css.query", NoMatches=Exception),
+        "textual.reactive":     _MagicMock(name="textual.reactive", reactive=lambda v: v),
+        "textual.screen":       _MagicMock(name="textual.screen", Screen=_Screen),
+        "textual.widgets":      _MagicMock(name="textual.widgets",
+                                           Button=_Base, Footer=_Base, Header=_Base,
+                                           Input=_Input, Label=_Base, ListItem=_Base,
+                                           ListView=_Base, Static=_Static, TextArea=_Base),
+    }
+    sys.modules.update(stubs)
+
+_maybe_stub_textual()
+
+# ── Module-level preload ───────────────────────────────────────────────────────
+#
+# Import aicli.app NOW at conftest load time (before any test file is collected).
+# This populates sys.modules with aicli.app + all transitive imports
+# (chromadb, textual, rich, httpx, tiktoken) exactly ONCE per pytest run.
+#
+# Without this, every test file that does `from aicli.app import cli` pays
+# the full cold-import cost independently (3–8 s each × 9 files = up to 70 s).
+# The noqa suppresses F401 "imported but unused" — it's used via sys.modules.
+try:
+    import aicli.app as _aicli_app_preload  # noqa: F401
+except Exception:
+    pass  # skip if editable install not ready
+
+
+@pytest.fixture(scope="session")
+def aicli_cli():
+    """
+    Import aicli.app.cli once per pytest session — the main performance win.
+
+    Without this, each test file does its own cold import of aicli.app which
+    re-triggers chromadb, textual, rich, httpx, tiktoken loading.
+    Using this fixture cuts 3–8s from a full pytest run.
+
+    Usage:
+        def test_something(aicli_cli):
+            from click.testing import CliRunner
+            result = CliRunner().invoke(aicli_cli, ["cmd", "--help"])
+    """
+    from aicli.app import cli
+    return cli
+
+
+@pytest.fixture(scope="session")
+def aicli_app():
+    """Import aicli.app module once per session for patching module-level names."""
+    import aicli.app as _app
+    return _app
+
+
+# ── Pytest markers ────────────────────────────────────────────────────────────
+
+def pytest_configure(config):
+    """Register custom markers for selective test runs.
+
+    Usage:
+        pytest tests/ -q -m "not slow"        # skip HTTP server tests
+        pytest tests/ -q -m "fast"            # only unit tests
+        pytest tests/ -q -m "serve"           # only serve tests
+    """
+    config.addinivalue_line("markers", "slow: marks tests as slow (HTTP servers, real I/O)")
+    config.addinivalue_line("markers", "fast: marks tests as fast pure unit tests")
+    config.addinivalue_line("markers", "serve: marks tests that start HTTP servers")

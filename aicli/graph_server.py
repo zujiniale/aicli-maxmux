@@ -144,6 +144,14 @@ svg{width:100%;height:100%;}
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--bg-panel);border:1px solid var(--accent);color:var(--text);font-size:12px;padding:7px 16px;border-radius:4px;opacity:0;pointer-events:none;transition:opacity 0.2s;z-index:100;}
 #toast.show{opacity:1;}
 #stats{position:absolute;bottom:8px;left:12px;font-size:10px;color:var(--muted);pointer-events:none;}
+#tag-bar{display:flex;align-items:center;gap:6px;padding:4px 16px;background:#0d0e13;border-bottom:1px solid var(--border);font-size:11px;flex-shrink:0;}
+#tag-bar input{background:var(--bg-panel);border:1px solid var(--border);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 8px;border-radius:3px;outline:none;width:160px;}
+#tag-bar input:focus{border-color:var(--accent);}
+#tag-bar button{background:var(--bg-panel);border:1px solid var(--border);color:var(--text);font-size:11px;padding:3px 9px;cursor:pointer;border-radius:3px;}
+#tag-bar button:hover{border-color:var(--accent);color:var(--accent);}
+#tag-bar .tag-chip{background:var(--bg-msg);border:1px solid var(--accent);color:var(--accent);font-size:10px;padding:2px 7px;border-radius:10px;cursor:pointer;}
+#tag-bar .tag-chip:hover{background:var(--accent);color:var(--bg);}
+.node-tag{fill:var(--amber);font-size:9px;}
 </style>
 </head>
 <body>
@@ -155,6 +163,14 @@ svg{width:100%;height:100%;}
   <button onclick="saveLinks()">Save links</button>
   <span class="hint">Drag=move · Click=select · Dbl-click=edit · Hover link=delete · L=link mode · Esc=cancel</span>
 </header>
+<div id="tag-bar">
+  <span style="color:var(--muted)">🏷 Tags:</span>
+  <input id="tag-filter-input" placeholder="filter by tag…" onkeydown="if(event.key==='Enter')filterByTag()">
+  <button onclick="filterByTag()">Filter</button>
+  <button onclick="clearTagFilter()" style="color:var(--muted)">Clear</button>
+  <span id="tag-chips" style="display:flex;gap:4px;flex-wrap:wrap;"></span>
+  <span id="filter-status" style="color:var(--muted);margin-left:8px;font-size:10px;"></span>
+</div>
 <div id="canvas">
   <svg id="svg">
     <defs>
@@ -207,6 +223,8 @@ function loadFromServer(){
     // Load saved links, replacing string refs with objects
     G.links=data.links.map(l=>({...l}));
     render();
+    _refreshTagChips();
+    if(_activeTagFilter) filterByTag();
     toast(added>0?`Loaded ${added} session(s)`:`${G.nodes.length} sessions (up to date)`);
   }).catch(e=>toast('Server error: '+e));
 }
@@ -223,15 +241,17 @@ function render(){
 
   const node=ng.selectAll('.node').data(G.nodes,d=>d.id);
   node.exit().remove();
-  const ne=node.enter().append('g').attr('class','node')
+  const ne=node.enter().append('g').attr('class','node').attr('id',d=>'n-'+d.id)
     .call(d3.drag().on('start',ds).on('drag',dd).on('end',de))
     .on('click',nc).on('dblclick',ndc);
   ne.append('circle').attr('class','base').attr('r',22);
   ne.append('text').attr('dy',-2);
   ne.append('text').attr('class','sub').attr('dy',12);
+  ne.append('text').attr('class','node-tag').attr('dy',24);
   const nm=ne.merge(node);
-  nm.select('text:not(.sub)').text(d=>(d.name||d.id).slice(0,13));
+  nm.select('text:not(.sub):not(.node-tag)').text(d=>(d.name||d.id).slice(0,13));
   nm.select('.sub').text(d=>d.msgs?d.msgs+'msg':'');
+  nm.select('.node-tag').text(d=>(d.tags&&d.tags.length)?'#'+d.tags[0]:'');
   nm.select('circle').classed('selected',d=>sel&&d.id===sel.id).classed('linking',d=>linkSrc&&d.id===linkSrc.id);
 
   sim.nodes(G.nodes).on('tick',()=>{
@@ -268,6 +288,7 @@ function openPanel(n){
     <h3>Session info</h3>
     <div class="f"><label>Name</label><input id="pn" value="${esc(n.name||'')}"></div>
     <div class="f"><label>Notes</label><textarea id="po" rows="2">${esc(n.notes||'')}</textarea></div>
+    <div class="f"><label>Tags (comma separated)</label><input id="pt-tags" value="${esc((n.tags||[]).join(', '))}"></div>
     ${n.summary?`<div class="f"><label>Summary</label><textarea rows="2" readonly style="opacity:.6">${esc(n.summary)}</textarea></div>`:''}
     <div class="f"><label>Messages</label><input value="${n.msgs||0}" readonly style="opacity:.5"></div>
     <h3 style="margin-top:12px">Links (${conns.length})</h3>
@@ -291,8 +312,53 @@ function savePanelEdits(id){
   const n=G.nodes.find(x=>x.id===id); if(!n)return;
   n.name=document.getElementById('pn').value.trim()||n.name;
   n.notes=document.getElementById('po').value;
+  // Save tags — split comma/space separated
+  const rawTags = (document.getElementById('pt-tags') ? document.getElementById('pt-tags').value : '');
+  n.tags = rawTags.split(/[,\s]+/).map(t=>t.trim()).filter(Boolean);
   document.getElementById('pt').textContent=n.name;
   render();saveLinks();toast('Saved');
+  _refreshTagChips();
+}
+
+function _allTags(){
+  const s=new Set();
+  G.nodes.forEach(n=>(n.tags||[]).forEach(t=>s.add(t)));
+  return [...s].sort();
+}
+
+function _refreshTagChips(){
+  const chips=document.getElementById('tag-chips');
+  chips.innerHTML='';
+  _allTags().forEach(tag=>{
+    const c=document.createElement('span');
+    c.className='tag-chip';c.textContent=tag;
+    c.onclick=()=>{document.getElementById('tag-filter-input').value=tag;filterByTag();};
+    chips.appendChild(c);
+  });
+}
+
+let _activeTagFilter='';
+function filterByTag(){
+  const tag=document.getElementById('tag-filter-input').value.trim().toLowerCase();
+  _activeTagFilter=tag;
+  const status=document.getElementById('filter-status');
+  if(!tag){clearTagFilter();return;}
+  G.nodes.forEach(n=>{
+    const el=document.getElementById('n-'+n.id);
+    if(el){
+      const match=(n.tags||[]).map(t=>t.toLowerCase()).includes(tag);
+      el.style.opacity=match?'1':'0.18';
+    }
+  });
+  const matches=G.nodes.filter(n=>(n.tags||[]).map(t=>t.toLowerCase()).includes(tag)).length;
+  status.textContent=`${matches} node${matches!==1?'s':''} tagged "${tag}"`;
+}
+
+function clearTagFilter(){
+  _activeTagFilter='';
+  document.getElementById('tag-filter-input').value='';
+  document.getElementById('filter-status').textContent='';
+  G.nodes.forEach(n=>{const el=document.getElementById('n-'+n.id);if(el)el.style.opacity='1';});
 }
 
 function toggleLinkMode(){
@@ -367,6 +433,9 @@ class GraphHandler(http.server.BaseHTTPRequestHandler):
                 if n["id"] in names:
                     n["name"]  = names[n["id"]].get("name", n["name"])
                     n["notes"] = names[n["id"]].get("notes", "")
+                    n["tags"]  = names[n["id"]].get("tags", [])
+                else:
+                    n["tags"] = []
             body = json.dumps({"nodes": nodes, "links": links}).encode()
             self._respond(200, "application/json", body)
         else:
@@ -379,6 +448,8 @@ class GraphHandler(http.server.BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             links = body.get("links", [])
             names = body.get("names", {})
+            # names dict now supports: {id: {name, notes, tags: []}}
+            # tags are preserved as-is — client sends full node metadata
             f = _graph_links_file()
             existing = {}
             try:
@@ -390,6 +461,30 @@ class GraphHandler(http.server.BaseHTTPRequestHandler):
             existing["saved"] = datetime.now().isoformat()
             f.write_text(json.dumps(existing, indent=2))
             self._respond(200, "application/json", b'{"ok":true}')
+        elif path == "/api/tags":
+            # POST /api/tags — filter nodes by tag
+            # Body: {"tag": "mytag"} → returns {nodes: [...]} matching tag
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            tag = body.get("tag", "").strip().lower()
+            nodes = load_sessions_from_exports()
+            meta_file = _exports_dir() / "graph_links.json"
+            names = {}
+            try:
+                names = json.loads(meta_file.read_text()).get("names", {})
+            except Exception:
+                pass
+            for n in nodes:
+                if n["id"] in names:
+                    n["name"]  = names[n["id"]].get("name", n["name"])
+                    n["notes"] = names[n["id"]].get("notes", "")
+                    n["tags"]  = names[n["id"]].get("tags", [])
+                else:
+                    n["tags"] = []
+            if tag:
+                nodes = [n for n in nodes if tag in [t.lower() for t in n.get("tags", [])]]
+            result = json.dumps({"nodes": nodes, "tag": tag}).encode()
+            self._respond(200, "application/json", result)
         else:
             self._respond(404, "text/plain", b"Not found")
 

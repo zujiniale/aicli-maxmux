@@ -131,6 +131,7 @@ pip install -r requirements.txt --quiet
 
 echo "📦 Installing aicli package (editable)..."
 pip install -e . --quiet
+pip install -e ".[all]" --quiet  # optional extras: RAG, proxy, TUI
 
 echo -e "${GREEN}✓ All Python dependencies installed${NC}"
 echo ""
@@ -326,6 +327,7 @@ echo "  6. Full TUI:         aicli tui"
 echo "  7. Session graph:    aicli graph"
 echo "  8. Export session:   aicli export mysession > out.md"
 echo "  9. Run tests:        python -m pytest tests/ -v"
+echo " 10. Install hotkey:   aicli config install-shell"
 echo ""
 echo "Provider failover order: Groq → OpenRouter → Gemini → Mistral → Ollama"
 echo ""

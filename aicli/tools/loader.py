@@ -106,6 +106,52 @@ def _load_plugin_file(path: Path) -> dict | None:
             return _asyncio.run(_fn(arg))
         tool["fn"] = _sync_wrapper
 
+    # ── OS tool auto-registration ──────────────────────────────────────────────
+    # If the plugin dict includes "parameters" (a JSON Schema properties dict),
+    # auto-register it into TOOL_REGISTRY so it becomes available to `aicli do`.
+    # This lets plugin authors expose tools to the LLM function-calling system
+    # by simply adding "parameters" to their register() return value.
+    #
+    # Example plugin with os_tool registration:
+    #   def register():
+    #       return {
+    #           "name": "create_jira_ticket",
+    #           "description": "Create a Jira ticket with title and description",
+    #           "parameters": {
+    #               "title": {"type": "string", "description": "Ticket title"},
+    #               "description": {"type": "string", "description": "Ticket body"},
+    #           },
+    #           "confirm": True,   # optional, default True
+    #           "safe": False,     # optional, default False
+    #           "fn": create_jira_ticket,
+    #       }
+    if "parameters" in tool:
+        try:
+            from aicli.tools.registry import TOOL_REGISTRY
+            name = tool["name"]
+            description = tool["description"]
+            parameters = tool["parameters"]
+            confirm = tool.get("confirm", True)
+            safe = tool.get("safe", False)
+            schema = {
+                "name": name,
+                "description": description,
+                "input_schema": {
+                    "type": "object",
+                    "properties": parameters,
+                    "required": list(parameters.keys()),
+                },
+            }
+            TOOL_REGISTRY[name] = {
+                "fn": tool["fn"],
+                "schema": schema,
+                "description": description,
+                "confirm": confirm,
+                "safe": safe,
+            }
+        except ImportError:
+            pass  # tools.registry not available in lite mode — skip silently
+
     return tool
 
 

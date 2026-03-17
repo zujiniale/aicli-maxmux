@@ -347,7 +347,7 @@ class TestMessageBlockInit:
 # ── HotkeyInput source inspection ────────────────────────────────────────────
 
 def _src():
-    return inspect.getsource(tui.HotkeyInput._on_key)
+    return inspect.getsource(tui.HotkeyInput.on_key)
 
 class TestHotkeyInputMappings:
     def test_f1(self):  assert '"f1"' in _src() or "'f1'" in _src()
@@ -374,3 +374,515 @@ class TestHotkeyInputMappings:
 
     def test_event_prevent_default(self):
         assert "event.prevent_default()" in _src()
+
+
+# ── Vim navigation (v1.5.3) ───────────────────────────────────────────────────
+
+class TestVimNavActionsRegistered:
+    """Verify vim nav entries exist in ACTIONS and DEFAULT_KEYS."""
+
+    def test_scroll_down_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "scroll_down" in ids
+
+    def test_scroll_up_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "scroll_up" in ids
+
+    def test_scroll_bottom_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "scroll_bottom" in ids
+
+    def test_scroll_top_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "scroll_top" in ids
+
+    def test_search_sessions_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "search_sessions" in ids
+
+    def test_delete_session_dd_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "delete_session_dd" in ids
+
+    def test_j_default_key(self):
+        assert tui.DEFAULT_KEYS.get("scroll_down") == "j"
+
+    def test_k_default_key(self):
+        assert tui.DEFAULT_KEYS.get("scroll_up") == "k"
+
+    def test_G_default_key(self):
+        assert tui.DEFAULT_KEYS.get("scroll_bottom") == "G"
+
+    def test_g_default_key(self):
+        assert tui.DEFAULT_KEYS.get("scroll_top") == "g"
+
+    def test_slash_default_key(self):
+        assert tui.DEFAULT_KEYS.get("search_sessions") == "/"
+
+    def test_no_duplicate_keys_after_vim(self):
+        ids = [a[0] for a in tui.ACTIONS]
+        assert len(ids) == len(set(ids)), "Duplicate action IDs found"
+
+
+class TestVimNavSourceInspection:
+    """Inspect tui.AicliTUI source to confirm action methods exist."""
+
+    import inspect as _inspect
+
+    def _src(self):
+        import inspect
+        return inspect.getsource(tui.AicliTUI)
+
+    def test_action_scroll_down_defined(self):
+        assert "action_scroll_down" in self._src()
+
+    def test_action_scroll_up_defined(self):
+        assert "action_scroll_up" in self._src()
+
+    def test_action_scroll_bottom_defined(self):
+        assert "action_scroll_bottom" in self._src()
+
+    def test_action_scroll_top_defined(self):
+        assert "action_scroll_top" in self._src()
+
+    def test_action_search_sessions_defined(self):
+        assert "action_search_sessions" in self._src()
+
+    def test_action_delete_session_dd_defined(self):
+        assert "action_delete_session_dd" in self._src()
+
+    def test_is_input_focused_guard_exists(self):
+        assert "_is_input_focused" in self._src()
+
+    def test_dd_pending_state_exists(self):
+        assert "_dd_pending" in self._src()
+
+    def test_cancel_dd_exists(self):
+        assert "_cancel_dd" in self._src()
+
+    def test_vim_keys_in_bindings(self):
+        import inspect
+        src = inspect.getsource(tui.AicliTUI)
+        for key in ('"j"', '"k"', '"G"', '"g"', '"slash"'):
+            assert key in src, f"Binding for {key} not found in AicliTUI"
+
+    def test_set_timer_used_for_dd(self):
+        """dd cancel uses set_timer — not asyncio.sleep."""
+        import inspect
+        src = inspect.getsource(tui.AicliTUI.action_delete_session_dd)
+        assert "set_timer" in src
+
+    def test_dd_fires_delete_on_second_press(self):
+        """action_delete_session_dd calls action_delete when _dd_pending is True."""
+        import inspect
+        src = inspect.getsource(tui.AicliTUI.action_delete_session_dd)
+        assert "action_delete" in src
+
+    def test_on_key_cancels_dd_on_non_d(self):
+        """on_key resets _dd_pending when key != 'd'."""
+        import inspect
+        src = inspect.getsource(tui.AicliTUI.on_key)
+        assert "_dd_pending" in src
+
+
+class TestVimNavHelpScreen:
+    """Verify vim nav appears in HelpScreen text."""
+
+    def test_j_k_in_help(self):
+        import inspect
+        src = inspect.getsource(tui.HelpScreen.compose)
+        assert "j / k" in src or ("j" in src and "k" in src)
+
+    def test_dd_in_help(self):
+        import inspect
+        src = inspect.getsource(tui.HelpScreen.compose)
+        assert "dd" in src
+
+    def test_slash_in_help(self):
+        import inspect
+        src = inspect.getsource(tui.HelpScreen.compose)
+        assert "/" in src
+
+    def test_G_in_help(self):
+        import inspect
+        src = inspect.getsource(tui.HelpScreen.compose)
+        assert "G" in src
+
+
+# ── Vim navigation (v1.5.3) ───────────────────────────────────────────────────
+
+class TestVimNavActionsStructure:
+    """Verify vim nav entries exist in ACTIONS and DEFAULT_KEYS."""
+
+    def test_scroll_down_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "scroll_down" in ids
+
+    def test_scroll_up_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "scroll_up" in ids
+
+    def test_scroll_bottom_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "scroll_bottom" in ids
+
+    def test_scroll_top_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "scroll_top" in ids
+
+    def test_search_sessions_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "search_sessions" in ids
+
+    def test_delete_session_dd_in_actions(self):
+        ids = {a[0] for a in tui.ACTIONS}
+        assert "delete_session_dd" in ids
+
+    def test_j_mapped_to_scroll_down(self):
+        assert tui.DEFAULT_KEYS["scroll_down"] == "j"
+
+    def test_k_mapped_to_scroll_up(self):
+        assert tui.DEFAULT_KEYS["scroll_up"] == "k"
+
+    def test_G_mapped_to_scroll_bottom(self):
+        assert tui.DEFAULT_KEYS["scroll_bottom"] == "G"
+
+    def test_g_mapped_to_scroll_top(self):
+        assert tui.DEFAULT_KEYS["scroll_top"] == "g"
+
+    def test_slash_mapped_to_search_sessions(self):
+        assert tui.DEFAULT_KEYS["search_sessions"] == "/"
+
+    def test_d_mapped_to_delete_dd(self):
+        assert tui.DEFAULT_KEYS["delete_session_dd"] == "d"
+
+    def test_no_duplicate_ids_after_vim_additions(self):
+        ids = [a[0] for a in tui.ACTIONS]
+        assert len(ids) == len(set(ids)), "Duplicate action IDs found"
+
+
+class TestVimNavSourceInspection:
+    """Source-level checks — vim action methods must exist and be correct."""
+
+    def _app_src(self):
+        import inspect
+        return inspect.getsource(tui.AicliTUI)
+
+    def test_action_scroll_down_exists(self):
+        assert "action_scroll_down" in self._app_src()
+
+    def test_action_scroll_up_exists(self):
+        assert "action_scroll_up" in self._app_src()
+
+    def test_action_scroll_bottom_exists(self):
+        assert "action_scroll_bottom" in self._app_src()
+
+    def test_action_scroll_top_exists(self):
+        assert "action_scroll_top" in self._app_src()
+
+    def test_action_search_sessions_exists(self):
+        assert "action_search_sessions" in self._app_src()
+
+    def test_action_delete_session_dd_exists(self):
+        assert "action_delete_session_dd" in self._app_src()
+
+    def test_input_focus_guard_present(self):
+        assert "_is_input_focused" in self._app_src()
+
+    def test_dd_pending_state_in_init(self):
+        import inspect
+        init_src = inspect.getsource(tui.AicliTUI.__init__)
+        assert "_dd_pending" in init_src
+
+    def test_dd_cancel_on_non_d_key(self):
+        src = self._app_src()
+        assert "_dd_pending" in src and "_cancel_dd" in src
+
+    def test_vim_mode_state_in_init(self):
+        import inspect
+        init_src = inspect.getsource(tui.AicliTUI.__init__)
+        assert "_vim_mode" in init_src
+
+    def test_help_screen_contains_vim_section(self):
+        import inspect
+        help_src = inspect.getsource(tui.HelpScreen.compose)
+        assert "vim" in help_src.lower() or "j / k" in help_src or "scroll" in help_src.lower()
+
+    def test_scroll_down_guards_input_focus(self):
+        import inspect
+        src = inspect.getsource(tui.AicliTUI.action_scroll_down)
+        assert "_is_input_focused" in src
+
+    def test_scroll_up_guards_input_focus(self):
+        import inspect
+        src = inspect.getsource(tui.AicliTUI.action_scroll_up)
+        assert "_is_input_focused" in src
+
+    def test_dd_action_guards_input_focus(self):
+        import inspect
+        src = inspect.getsource(tui.AicliTUI.action_delete_session_dd)
+        assert "_is_input_focused" in src
+
+
+class TestVimNavBindingsInSource:
+    """Verify BINDINGS list contains vim keys."""
+
+    def _bindings_src(self):
+        import inspect
+        return inspect.getsource(tui.AicliTUI)
+
+    def test_j_binding_present(self):
+        assert '"j"' in self._bindings_src() or "'j'" in self._bindings_src()
+
+    def test_k_binding_present(self):
+        assert '"k"' in self._bindings_src() or "'k'" in self._bindings_src()
+
+    def test_G_binding_present(self):
+        assert '"G"' in self._bindings_src() or "'G'" in self._bindings_src()
+
+    def test_g_binding_present(self):
+        assert '"g"' in self._bindings_src() or "'g'" in self._bindings_src()
+
+    def test_slash_binding_present(self):
+        import inspect
+        bindings_src = inspect.getsource(tui.AicliTUI)
+        assert "slash" in bindings_src or '"/"' in bindings_src
+
+
+class TestObsidianExport:
+    """Tests for the new _to_obsidian export function in export.py."""
+
+    def _messages(self):
+        return [
+            {"role": "user",      "content": "Hello there",   "timestamp": "2026-03-15 10:00"},
+            {"role": "assistant", "content": "Hi! How can I help?", "timestamp": "2026-03-15 10:01"},
+            {"role": "system",    "content": "[AUTO-SUMMARY] Brief summary of session"},
+            {"role": "user",      "content": "Tell me about Python", "timestamp": "2026-03-15 10:02"},
+            {"role": "assistant", "content": "Python is a language.", "timestamp": "2026-03-15 10:03"},
+        ]
+
+    def test_obsidian_returns_string(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(), None)
+        assert isinstance(result, str)
+        assert len(result) > 100
+
+    def test_obsidian_has_yaml_frontmatter(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(), None)
+        assert result.startswith("---\n")
+        assert "title:" in result
+        assert "session_id:" in result
+        assert "date:" in result
+
+    def test_obsidian_has_aicli_tag_in_frontmatter(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(), None)
+        assert "aicli" in result
+
+    def test_obsidian_has_assistant_callout(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(), None)
+        assert "[!assistant]" in result
+
+    def test_obsidian_has_message_anchors(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(), None)
+        assert "^msg-" in result
+
+    def test_obsidian_includes_summary_callout(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(),
+                              "This is the session summary.", include_summary=True)
+        assert "[!summary]" in result
+        assert "This is the session summary." in result
+
+    def test_obsidian_no_summary_callout_when_not_requested(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(),
+                              "This is the summary.", include_summary=False)
+        assert "[!summary]" not in result
+
+    def test_obsidian_auto_summary_becomes_info_callout(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(), None)
+        assert "[!info]" in result
+
+    def test_obsidian_user_messages_present(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(), None)
+        assert "Hello there" in result
+        assert "Tell me about Python" in result
+
+    def test_obsidian_assistant_messages_present(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(), None)
+        assert "Hi! How can I help?" in result
+
+    def test_obsidian_frontmatter_has_message_count(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(), None)
+        assert "message_count:" in result
+
+    def test_obsidian_summary_in_frontmatter_description(self):
+        from aicli.handlers.export import _to_obsidian
+        result = _to_obsidian("myproject", "abc-123", self._messages(),
+                              "A really long summary here with many words to test truncation behavior")
+        assert "description:" in result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DoModeScreen (F9 — aicli do in TUI)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDoModeScreen:
+    """DoModeScreen modal dialog and F9 do-mode binding."""
+
+    def test_do_mode_screen_class_defined(self):
+        """DoModeScreen class exists in tui.py."""
+        from aicli.tui import DoModeScreen
+        assert DoModeScreen is not None
+
+    def test_do_mode_screen_is_screen_subclass(self):
+        """DoModeScreen subclasses Textual Screen."""
+        from textual.screen import Screen
+        from aicli.tui import DoModeScreen
+        assert issubclass(DoModeScreen, Screen)
+
+    def test_do_mode_screen_has_escape_binding(self):
+        """DoModeScreen has Escape → cancel binding."""
+        import inspect
+        from aicli.tui import DoModeScreen
+        src = inspect.getsource(DoModeScreen)
+        assert "escape" in src.lower()
+        assert "cancel" in src
+
+    def test_do_mode_screen_has_enter_binding(self):
+        """DoModeScreen has Enter → submit binding."""
+        import inspect
+        from aicli.tui import DoModeScreen
+        src = inspect.getsource(DoModeScreen)
+        assert "enter" in src.lower()
+        assert "submit" in src
+
+    def test_do_mode_screen_has_ctrl_y_toggle_binding(self):
+        """DoModeScreen has Ctrl+Y → toggle_confirm binding."""
+        import inspect
+        from aicli.tui import DoModeScreen
+        src = inspect.getsource(DoModeScreen)
+        assert "ctrl+y" in src.lower() or "toggle_confirm" in src
+
+    def test_do_mode_screen_has_action_submit(self):
+        """DoModeScreen.action_submit is defined."""
+        from aicli.tui import DoModeScreen
+        assert hasattr(DoModeScreen, "action_submit")
+        assert callable(DoModeScreen.action_submit)
+
+    def test_do_mode_screen_has_action_cancel(self):
+        """DoModeScreen.action_cancel is defined."""
+        from aicli.tui import DoModeScreen
+        assert hasattr(DoModeScreen, "action_cancel")
+        assert callable(DoModeScreen.action_cancel)
+
+    def test_do_mode_screen_has_action_toggle_confirm(self):
+        """DoModeScreen.action_toggle_confirm is defined."""
+        from aicli.tui import DoModeScreen
+        assert hasattr(DoModeScreen, "action_toggle_confirm")
+        assert callable(DoModeScreen.action_toggle_confirm)
+
+    def test_do_mode_screen_auto_confirm_default_true(self):
+        """DoModeScreen._auto_confirm defaults to True."""
+        import inspect
+        from aicli.tui import DoModeScreen
+        src = inspect.getsource(DoModeScreen.__init__)
+        assert "_auto_confirm" in src
+        assert "True" in src
+
+    def test_do_mode_screen_has_mode_label(self):
+        """DoModeScreen compose() yields a mode label widget."""
+        import inspect
+        from aicli.tui import DoModeScreen
+        src = inspect.getsource(DoModeScreen.compose)
+        assert "do-mode-label" in src
+
+    def test_do_mode_screen_has_input_widget(self):
+        """DoModeScreen compose() yields an Input widget."""
+        import inspect
+        from aicli.tui import DoModeScreen
+        src = inspect.getsource(DoModeScreen.compose)
+        assert "Input" in src
+        assert "do-input" in src
+
+    def test_do_mode_screen_on_input_submitted(self):
+        """DoModeScreen.on_input_submitted routes to action_submit."""
+        from aicli.tui import DoModeScreen
+        assert hasattr(DoModeScreen, "on_input_submitted")
+
+    def test_f9_in_aicli_tui_bindings(self):
+        """F9 is bound to do_mode in AicliTUI BINDINGS."""
+        import inspect
+        from aicli.tui import AicliTUI
+        src = inspect.getsource(AicliTUI)
+        assert "f9" in src.lower()
+        assert "do_mode" in src
+
+    def test_action_do_mode_defined_on_aicli_tui(self):
+        """AicliTUI.action_do_mode is defined."""
+        from aicli.tui import AicliTUI
+        assert hasattr(AicliTUI, "action_do_mode")
+        assert callable(AicliTUI.action_do_mode)
+
+    def test_handle_do_result_defined(self):
+        """AicliTUI._handle_do_result callback is defined."""
+        from aicli.tui import AicliTUI
+        assert hasattr(AicliTUI, "_handle_do_result")
+        assert callable(AicliTUI._handle_do_result)
+
+    def test_run_do_command_defined_on_aicli_tui(self):
+        """AicliTUI._run_do_command async method is defined."""
+        import asyncio
+        from aicli.tui import AicliTUI
+        assert hasattr(AicliTUI, "_run_do_command")
+        assert asyncio.iscoroutinefunction(AicliTUI._run_do_command)
+
+    def test_run_do_command_uses_auto_confirm(self):
+        """_run_do_command calls run_do_command with auto_confirm parameter."""
+        import inspect
+        from aicli.tui import AicliTUI
+        src = inspect.getsource(AicliTUI._run_do_command)
+        assert "auto_confirm" in src
+
+    def test_run_do_command_supports_dry_run_mode(self):
+        """_run_do_command passes dry_run=True when auto_confirm=False."""
+        import inspect
+        from aicli.tui import AicliTUI
+        src = inspect.getsource(AicliTUI._run_do_command)
+        assert "dry_run" in src
+
+    def test_run_do_command_captures_stdout(self):
+        """_run_do_command uses redirect_stdout to capture tool output."""
+        import inspect
+        from aicli.tui import AicliTUI
+        src = inspect.getsource(AicliTUI._run_do_command)
+        assert "redirect_stdout" in src
+
+    def test_run_do_command_handles_import_error(self):
+        """_run_do_command handles ImportError gracefully (lite install)."""
+        import inspect
+        from aicli.tui import AicliTUI
+        src = inspect.getsource(AicliTUI._run_do_command)
+        assert "ImportError" in src
+
+    def test_do_mode_in_actions_list(self):
+        """do_mode action appears in ACTIONS list."""
+        from aicli.tui import ACTIONS
+        ids = [a[0] for a in ACTIONS]
+        assert "do_mode" in ids, "do_mode must be in ACTIONS list"
+
+    def test_do_mode_action_has_f9_key(self):
+        """do_mode entry in ACTIONS has f9 as its key."""
+        from aicli.tui import ACTIONS
+        do_entry = next((a for a in ACTIONS if a[0] == "do_mode"), None)
+        assert do_entry is not None, "do_mode not found in ACTIONS"
+        assert do_entry[1] == "f9", f"Expected f9, got {do_entry[1]}"

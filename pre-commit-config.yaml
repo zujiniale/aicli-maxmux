@@ -1,0 +1,48 @@
+# .pre-commit-config.yaml — aicli-maxmux pre-commit hooks
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+
+  # ── Version consistency ───────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: version-sync
+        name: Verify version consistency across all files
+        entry: python bump_version.py --current
+        language: python
+        pass_filenames: false
+        always_run: true
+
+      - id: static-checks
+        name: aicli static checker (run_tests.py)
+        entry: python run_tests.py
+        language: python
+        pass_filenames: false
+        always_run: true
+        # Runs all 44 phases in <0.1s — fast enough for every commit
+
+  # ── Standard quality gates ────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'         # markdown intentional trailing spaces
+      - id: end-of-file-fixer
+        exclude: '\.md$'
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=500']    # catch accidental model/data file commits
+      - id: debug-statements     # catch leftover breakpoint() / pdb calls
+      - id: check-ast            # syntax check all Python files
+      - id: no-commit-to-branch
+        args: ['--branch', 'main']  # require PR for main (optional, remove if solo)
+
+  # ── Python formatting (optional — remove if you prefer manual) ────────────
+  # - repo: https://github.com/astral-sh/ruff-pre-commit
+  #   rev: v0.3.0
+  #   hooks:
+  #     - id: ruff
+  #       args: [--fix, --exit-non-zero-on-fix]

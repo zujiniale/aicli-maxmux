@@ -7,7 +7,7 @@ from ..db.chat_db import get_connection, list_sessions, load_messages, load_late
 from ..printer import print_error, print_info
 
 
-async def _export(session_name: str, fmt: str, output: str | None, include_summary: bool = False):
+async def _export(session_name: str, fmt: str, output: str | None, include_summary: bool = False, obsidian: bool = False):
     conn = get_connection()
     sessions = list_sessions(conn)
     matching = [s for s in sessions if s["name"] == session_name or s["id"] == session_name]
@@ -26,6 +26,8 @@ async def _export(session_name: str, fmt: str, output: str | None, include_summa
 
     if fmt == "json":
         content = _to_json(session_name, session_id, messages, summary, include_summary=include_summary)
+    elif obsidian:
+        content = _to_obsidian(session_name, session_id, messages, summary, include_summary=include_summary)
     else:
         content = _to_markdown(session_name, session_id, messages, summary, include_summary=include_summary)
 
@@ -85,3 +87,87 @@ def _to_json(session_name, session_id, messages, summary, include_summary: bool 
         ],
     }
     return json.dumps(data, indent=2) + "\n"
+
+
+def _to_obsidian(session_name, session_id, messages, summary, include_summary: bool = False) -> str:
+    """
+    Obsidian-compatible markdown export.
+
+    Features vs standard markdown:
+    - YAML frontmatter (title, session_id, date, tags, summary)
+    - [[wikilinks]] for session cross-references mentioned in messages
+    - Callout blocks for assistant responses (> [!assistant])
+    - Summary as a collapsible > [!summary] callout
+    - Each message timestamped and linkable via heading anchors
+    """
+    now = datetime.now()
+    lines = []
+
+    # ── YAML frontmatter ──────────────────────────────────────────────────────
+    lines.append("---")
+    lines.append(f"title: \"{session_name}\"")
+    lines.append(f"session_id: \"{session_id}\"")
+    lines.append(f"date: {now.strftime('%Y-%m-%d')}")
+    lines.append(f"created: {now.strftime('%Y-%m-%dT%H:%M:%S')}")
+    lines.append(f"message_count: {len([m for m in messages if m['role'] != 'system'])}")
+    lines.append("tags:")
+    lines.append("  - aicli")
+    lines.append("  - ai-session")
+    if summary:
+        # First 12 words of summary as description
+        desc = " ".join(summary.split()[:12])
+        lines.append(f"description: \"{desc}…\"")
+    lines.append("---")
+    lines.append("")
+
+    # ── Title + backlink ──────────────────────────────────────────────────────
+    lines.append(f"# {session_name}")
+    lines.append("")
+    lines.append(f"> Session `{session_id[:8]}` · exported {now.strftime('%Y-%m-%d %H:%M')}")
+    lines.append("")
+
+    # ── Summary callout ───────────────────────────────────────────────────────
+    if include_summary and summary:
+        lines.append("> [!summary]+ Session Summary")
+        for sline in summary.strip().splitlines():
+            lines.append(f"> {sline}")
+        lines.append("")
+
+    lines.append("---")
+    lines.append("")
+
+    # ── Messages ──────────────────────────────────────────────────────────────
+    for idx, msg in enumerate(messages):
+        role = msg["role"]
+        content = msg["content"]
+        timestamp = msg.get("timestamp", "")
+        ts = timestamp[:16] if timestamp else now.strftime("%Y-%m-%d %H:%M")
+
+        if role == "system":
+            if content.startswith("[AUTO-SUMMARY]"):
+                lines.append("> [!info]- Auto-summary")
+                lines.append(f"> {content[14:].strip()}")
+                lines.append("")
+            continue
+
+        elif role == "user":
+            lines.append(f"## 💬 You  ^msg-{idx}")
+            lines.append(f"*{ts}*")
+            lines.append("")
+            lines.append(content)
+            lines.append("")
+
+        elif role == "assistant":
+            lines.append(f"## 🤖 Assistant  ^msg-{idx}")
+            lines.append(f"*{ts}*")
+            lines.append("")
+            # Wrap in callout for visual distinction
+            lines.append("> [!assistant]-")
+            for cline in content.splitlines():
+                lines.append(f"> {cline}" if cline else ">")
+            lines.append("")
+
+        lines.append("---")
+        lines.append("")
+
+    return "\n".join(lines) + "\n"

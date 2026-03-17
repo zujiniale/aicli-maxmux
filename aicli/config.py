@@ -220,7 +220,8 @@ def load_config() -> dict:
     """Load config.toml, creating defaults if missing."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+    # CHROMA_DIR is created on-demand in context/manager.py initialize()
+    # — only when RAG is actually used, not on every aicli invocation.
 
     if not CONFIG_FILE.exists():
         _write_default_config()

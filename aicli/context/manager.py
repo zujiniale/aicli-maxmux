@@ -112,6 +112,7 @@ class ContextManager:
             from ..config import CHROMA_DIR
             from ..context.retriever import ContextRetriever
             self._chroma_dir = CHROMA_DIR
+            CHROMA_DIR.mkdir(parents=True, exist_ok=True)  # Created here, not in load_config()
             self._rag_enabled = True
             if all_messages:
                 # Backfill: index any existing messages not yet in ChromaDB (fire-and-forget)

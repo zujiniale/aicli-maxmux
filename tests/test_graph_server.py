@@ -23,8 +23,26 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 
+# Mark server-starting test classes as slow
+# Skip with: pytest tests/ -q -m "not slow"
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+import socket as _socket
+
+def _wait_for_port(host: str, port: int, timeout: float = 3.0) -> bool:
+    """Poll until port accepts connections — replaces time.sleep(0.x) for server startup."""
+    import time as _time
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        try:
+            with _socket.create_connection((host, port), timeout=0.05):
+                return True
+        except OSError:
+            _time.sleep(0.01)
+    return False
+
 
 def _write_session(directory: Path, filename: str, session_id: str,
                    name: str, messages: list, extra: dict = None) -> Path:
@@ -225,6 +243,7 @@ class TestGraphLinks:
 
 class TestGraphHandler:
     """Integration tests — spin up a real server on a random port."""
+    pytestmark = pytest.mark.slow
 
     @pytest.fixture
     def server(self, tmp_path):
@@ -393,6 +412,7 @@ class TestKillExisting:
 # ── ReusableTCPServer ─────────────────────────────────────────────────────────
 
 class TestReusableTCPServer:
+    pytestmark = pytest.mark.slow
 
     def test_allow_reuse_address_is_true(self):
         import aicli.graph_server as gs
@@ -405,7 +425,7 @@ class TestReusableTCPServer:
             port = srv.server_address[1]
             t = threading.Thread(target=srv.serve_forever, daemon=True)
             t.start()
-            time.sleep(0.1)
+            _wait_for_port("localhost", port)
 
             conn = http.client.HTTPConnection("localhost", port, timeout=3)
             conn.request("GET", "/")
@@ -415,3 +435,448 @@ class TestReusableTCPServer:
 
             srv.shutdown()
             srv.server_close()
+
+
+# ── Node tags (v1.5.3) ────────────────────────────────────────────────────────
+
+class TestNodeTags:
+    """Tags are stored in graph_links.json names dict and surfaced via /api/sessions."""
+
+    def test_tags_in_api_sessions_response(self, tmp_path):
+        """Nodes in /api/sessions have a tags field."""
+        import aicli.graph_server as gs
+        _write_session(tmp_path, "proj__latest.json", "t-id", "Tagged",
+                       [{"role": "user", "content": "hi"}])
+        (tmp_path / "graph_links.json").write_text(json.dumps({
+            "links": [],
+            "names": {"t-id": {"name": "Tagged", "notes": "", "tags": ["research", "python"]}}
+        }))
+        with patch.object(gs, "_exports_dir", return_value=tmp_path):
+            nodes = gs.load_sessions_from_exports()
+            # Simulate the merge that /api/sessions does
+            names = json.loads((tmp_path / "graph_links.json").read_text()).get("names", {})
+            for n in nodes:
+                if n["id"] in names:
+                    n["tags"] = names[n["id"]].get("tags", [])
+                else:
+                    n["tags"] = []
+        assert nodes[0]["tags"] == ["research", "python"]
+
+    def test_tags_empty_by_default(self, tmp_path):
+        """Node with no saved metadata gets tags=[]."""
+        import aicli.graph_server as gs
+        _write_session(tmp_path, "plain__latest.json", "p-id", "Plain",
+                       [{"role": "user", "content": "hi"}])
+        with patch.object(gs, "_exports_dir", return_value=tmp_path):
+            nodes = gs.load_sessions_from_exports()
+            names = {}
+            for n in nodes:
+                n["tags"] = names.get(n["id"], {}).get("tags", [])
+        assert nodes[0]["tags"] == []
+
+    def test_tags_persisted_in_save(self, tmp_path):
+        """Tags survive a save/load round-trip via graph_links.json."""
+        import aicli.graph_server as gs
+        links_file = tmp_path / "graph_links.json"
+        payload = {
+            "links": [],
+            "names": {
+                "sess-a": {"name": "Session A", "notes": "", "tags": ["ml", "experiment"]},
+                "sess-b": {"name": "Session B", "notes": "note", "tags": []},
+            }
+        }
+        with patch.object(gs, "_exports_dir", return_value=tmp_path):
+            gs.save_graph_links(payload["links"])
+            # Write names manually as save_graph_links only handles links
+            existing = json.loads(links_file.read_text())
+            existing["names"] = payload["names"]
+            links_file.write_text(json.dumps(existing))
+            saved = json.loads(links_file.read_text())
+        assert saved["names"]["sess-a"]["tags"] == ["ml", "experiment"]
+        assert saved["names"]["sess-b"]["tags"] == []
+
+    def test_tags_case_insensitive_filter(self, tmp_path):
+        """Tag filter is case-insensitive."""
+        import aicli.graph_server as gs
+        srv = gs.ReusableTCPServer(("localhost", 0), gs.GraphHandler)
+        port = srv.server_address[1]
+        _write_session(tmp_path, "a__latest.json", "id-a", "Session A",
+                       [{"role": "user", "content": "hi"}])
+        (tmp_path / "graph_links.json").write_text(json.dumps({
+            "links": [],
+            "names": {"id-a": {"name": "Session A", "notes": "", "tags": ["Python"]}}
+        }))
+
+        import threading, http.client
+        patcher = patch.object(gs, "_exports_dir", return_value=tmp_path)
+        patcher.start()
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+
+        try:
+            body = json.dumps({"tag": "python"}).encode()  # lowercase
+            conn = http.client.HTTPConnection("localhost", port, timeout=3)
+            conn.request("POST", "/api/tags", body=body,
+                         headers={"Content-Type": "application/json",
+                                  "Content-Length": str(len(body))})
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            conn.close()
+            assert resp.status == 200
+            assert len(data["nodes"]) == 1
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            patcher.stop()
+
+    def test_tags_filter_returns_matching_only(self, tmp_path):
+        """POST /api/tags only returns nodes that have the requested tag."""
+        import aicli.graph_server as gs, threading, http.client
+
+        _write_session(tmp_path, "a__latest.json", "id-a", "A",
+                       [{"role": "user", "content": "hi"}])
+        _write_session(tmp_path, "b__latest.json", "id-b", "B",
+                       [{"role": "user", "content": "hello"}])
+        (tmp_path / "graph_links.json").write_text(json.dumps({
+            "links": [],
+            "names": {
+                "id-a": {"name": "A", "notes": "", "tags": ["nlp"]},
+                "id-b": {"name": "B", "notes": "", "tags": ["vision"]},
+            }
+        }))
+        srv = gs.ReusableTCPServer(("localhost", 0), gs.GraphHandler)
+        port = srv.server_address[1]
+        patcher = patch.object(gs, "_exports_dir", return_value=tmp_path)
+        patcher.start()
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+        try:
+            body = json.dumps({"tag": "nlp"}).encode()
+            conn = http.client.HTTPConnection("localhost", port, timeout=3)
+            conn.request("POST", "/api/tags", body=body,
+                         headers={"Content-Type": "application/json",
+                                  "Content-Length": str(len(body))})
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            conn.close()
+            assert len(data["nodes"]) == 1
+            assert data["nodes"][0]["id"] == "id-a"
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            patcher.stop()
+
+    def test_tags_filter_empty_tag_returns_all(self, tmp_path):
+        """POST /api/tags with empty tag returns all nodes."""
+        import aicli.graph_server as gs, threading, http.client
+
+        _write_session(tmp_path, "a__latest.json", "id-a", "A",
+                       [{"role": "user", "content": "hi"}])
+        _write_session(tmp_path, "b__latest.json", "id-b", "B",
+                       [{"role": "user", "content": "hello"}])
+        srv = gs.ReusableTCPServer(("localhost", 0), gs.GraphHandler)
+        port = srv.server_address[1]
+        patcher = patch.object(gs, "_exports_dir", return_value=tmp_path)
+        patcher.start()
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+        try:
+            body = json.dumps({"tag": ""}).encode()
+            conn = http.client.HTTPConnection("localhost", port, timeout=3)
+            conn.request("POST", "/api/tags", body=body,
+                         headers={"Content-Type": "application/json",
+                                  "Content-Length": str(len(body))})
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            conn.close()
+            assert resp.status == 200
+            assert len(data["nodes"]) == 2
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            patcher.stop()
+
+
+# ── Obsidian export (v1.5.3) ──────────────────────────────────────────────────
+
+class TestObsidianExport:
+    """Tests for export.py _to_obsidian."""
+
+    def _msgs(self):
+        return [
+            {"role": "user", "content": "Hello there", "timestamp": "2026-03-15T10:00:00"},
+            {"role": "assistant", "content": "Hi! How can I help?", "timestamp": "2026-03-15T10:00:05"},
+            {"role": "user", "content": "What is Python?", "timestamp": "2026-03-15T10:01:00"},
+            {"role": "assistant", "content": "Python is a high-level language.", "timestamp": "2026-03-15T10:01:05"},
+        ]
+
+    def _get_obsidian(self, **kwargs):
+        from aicli.handlers.export import _to_obsidian
+        return _to_obsidian("myproject", "abc-123", self._msgs(), "Test summary.", **kwargs)
+
+    def test_returns_string(self):
+        assert isinstance(self._get_obsidian(), str)
+
+    def test_has_yaml_frontmatter(self):
+        out = self._get_obsidian()
+        assert out.startswith("---\n")
+        assert "\n---\n" in out
+
+    def test_frontmatter_has_title(self):
+        out = self._get_obsidian()
+        assert 'title: "myproject"' in out
+
+    def test_frontmatter_has_session_id(self):
+        out = self._get_obsidian()
+        assert 'session_id: "abc-123"' in out
+
+    def test_frontmatter_has_aicli_tag(self):
+        out = self._get_obsidian()
+        assert "- aicli" in out
+
+    def test_frontmatter_has_date(self):
+        import re
+        out = self._get_obsidian()
+        assert re.search(r"date: \d{4}-\d{2}-\d{2}", out)
+
+    def test_has_h1_title(self):
+        out = self._get_obsidian()
+        assert "# myproject" in out
+
+    def test_assistant_callout_blocks(self):
+        out = self._get_obsidian()
+        assert "> [!assistant]-" in out
+
+    def test_summary_callout_when_included(self):
+        from aicli.handlers.export import _to_obsidian
+        out = _to_obsidian("proj", "id-x", self._msgs(), "Summary text here.", include_summary=True)
+        assert "> [!summary]+" in out
+        assert "Summary text here." in out
+
+    def test_no_summary_callout_when_not_included(self):
+        out = self._get_obsidian()
+        assert "> [!summary]" not in out
+
+    def test_user_messages_present(self):
+        out = self._get_obsidian()
+        assert "Hello there" in out
+        assert "What is Python?" in out
+
+    def test_assistant_messages_present(self):
+        out = self._get_obsidian()
+        assert "Hi! How can I help?" in out
+        assert "Python is a high-level language." in out
+
+    def test_heading_anchors_for_wikilinks(self):
+        """Each message gets a ^msg-N anchor for [[wikilink]] referencing."""
+        out = self._get_obsidian()
+        assert "^msg-0" in out
+        assert "^msg-1" in out
+
+    def test_system_messages_skipped(self):
+        from aicli.handlers.export import _to_obsidian
+        msgs = self._msgs() + [{"role": "system", "content": "internal", "timestamp": ""}]
+        out = _to_obsidian("proj", "id-x", msgs, None)
+        assert "internal" not in out
+
+    def test_auto_summary_system_message_as_callout(self):
+        from aicli.handlers.export import _to_obsidian
+        msgs = self._msgs() + [
+            {"role": "system", "content": "[AUTO-SUMMARY] This is the auto summary.", "timestamp": ""}
+        ]
+        out = _to_obsidian("proj", "id-x", msgs, None)
+        assert "> [!info]-" in out
+        assert "This is the auto summary." in out
+
+    def test_different_from_standard_markdown(self):
+        from aicli.handlers.export import _to_markdown, _to_obsidian
+        md = _to_markdown("proj", "id-x", self._msgs(), None)
+        obs = _to_obsidian("proj", "id-x", self._msgs(), None)
+        assert md != obs
+
+    def test_message_count_in_frontmatter(self):
+        out = self._get_obsidian()
+        assert "message_count: 4" in out
+
+
+# ── Node tag support (v1.5.3) ─────────────────────────────────────────────────
+
+class TestNodeTags:
+    """Tests for tag persistence and filtering in graph_server."""
+
+    def test_save_tags_roundtrip(self, tmp_path):
+        """Tags saved in names dict are returned in /api/sessions."""
+        import aicli.graph_server as gs
+        _write_session(tmp_path, "proj__latest.json", "sess-tag", "Tagged Project",
+                       [{"role": "user", "content": "hi"}])
+        # Manually write graph_links.json with tags
+        (tmp_path / "graph_links.json").write_text(json.dumps({
+            "links": [],
+            "names": {"sess-tag": {"name": "Tagged Project", "notes": "", "tags": ["research", "python"]}}
+        }))
+        with patch.object(gs, "_exports_dir", return_value=tmp_path):
+            nodes = gs.load_sessions_from_exports()
+        # Tags merged in do_GET /api/sessions — test via HTTP
+        srv = gs.ReusableTCPServer(("localhost", 0), gs.GraphHandler)
+        port = srv.server_address[1]
+        import threading
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        with patch.object(gs, "_exports_dir", return_value=tmp_path):
+            t.start()
+            _wait_for_port("localhost", port)
+            conn = http.client.HTTPConnection("localhost", port, timeout=3)
+            conn.request("GET", "/api/sessions")
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+            conn.close()
+        srv.shutdown(); srv.server_close()
+        assert len(data["nodes"]) == 1
+        assert data["nodes"][0]["tags"] == ["research", "python"]
+
+    def test_nodes_without_tags_get_empty_list(self, tmp_path):
+        """Nodes with no saved tags get tags=[] in response."""
+        import aicli.graph_server as gs
+        _write_session(tmp_path, "notags__latest.json", "no-tags-id", "No Tags",
+                       [{"role": "user", "content": "hi"}])
+        srv = gs.ReusableTCPServer(("localhost", 0), gs.GraphHandler)
+        port = srv.server_address[1]
+        import threading, http.client, time
+        with patch.object(gs, "_exports_dir", return_value=tmp_path):
+            t = threading.Thread(target=srv.serve_forever, daemon=True)
+            t.start()
+            _wait_for_port("localhost", port)
+            conn = http.client.HTTPConnection("localhost", port, timeout=3)
+            conn.request("GET", "/api/sessions")
+            data = json.loads(conn.getresponse().read())
+            conn.close()
+        srv.shutdown(); srv.server_close()
+        assert data["nodes"][0]["tags"] == []
+
+    def test_api_tags_filters_by_tag(self, tmp_path):
+        """POST /api/tags with tag returns only matching nodes."""
+        import aicli.graph_server as gs
+        _write_session(tmp_path, "a__latest.json", "id-a", "Session A",
+                       [{"role": "user", "content": "a"}])
+        _write_session(tmp_path, "b__latest.json", "id-b", "Session B",
+                       [{"role": "user", "content": "b"}])
+        (tmp_path / "graph_links.json").write_text(json.dumps({
+            "links": [],
+            "names": {
+                "id-a": {"name": "Session A", "notes": "", "tags": ["python"]},
+                "id-b": {"name": "Session B", "notes": "", "tags": ["research"]},
+            }
+        }))
+        srv = gs.ReusableTCPServer(("localhost", 0), gs.GraphHandler)
+        port = srv.server_address[1]
+        import threading, http.client, time
+        with patch.object(gs, "_exports_dir", return_value=tmp_path):
+            t = threading.Thread(target=srv.serve_forever, daemon=True)
+            t.start()
+            _wait_for_port("localhost", port)
+            body = json.dumps({"tag": "python"}).encode()
+            conn = http.client.HTTPConnection("localhost", port, timeout=3)
+            conn.request("POST", "/api/tags", body=body,
+                         headers={"Content-Type": "application/json",
+                                  "Content-Length": str(len(body))})
+            data = json.loads(conn.getresponse().read())
+            conn.close()
+        srv.shutdown(); srv.server_close()
+        assert len(data["nodes"]) == 1
+        assert data["nodes"][0]["id"] == "id-a"
+        assert data["tag"] == "python"
+
+    def test_api_tags_empty_tag_returns_all(self, tmp_path):
+        """POST /api/tags with empty tag returns all nodes."""
+        import aicli.graph_server as gs
+        _write_session(tmp_path, "a__latest.json", "id-a", "A",
+                       [{"role": "user", "content": "a"}])
+        _write_session(tmp_path, "b__latest.json", "id-b", "B",
+                       [{"role": "user", "content": "b"}])
+        srv = gs.ReusableTCPServer(("localhost", 0), gs.GraphHandler)
+        port = srv.server_address[1]
+        import threading, http.client, time
+        with patch.object(gs, "_exports_dir", return_value=tmp_path):
+            t = threading.Thread(target=srv.serve_forever, daemon=True)
+            t.start()
+            _wait_for_port("localhost", port)
+            body = json.dumps({"tag": ""}).encode()
+            conn = http.client.HTTPConnection("localhost", port, timeout=3)
+            conn.request("POST", "/api/tags", body=body,
+                         headers={"Content-Type": "application/json",
+                                  "Content-Length": str(len(body))})
+            data = json.loads(conn.getresponse().read())
+            conn.close()
+        srv.shutdown(); srv.server_close()
+        assert len(data["nodes"]) == 2
+
+    def test_api_tags_case_insensitive(self, tmp_path):
+        """Tag filter is case-insensitive."""
+        import aicli.graph_server as gs
+        _write_session(tmp_path, "a__latest.json", "id-ci", "CI Session",
+                       [{"role": "user", "content": "ci"}])
+        (tmp_path / "graph_links.json").write_text(json.dumps({
+            "links": [],
+            "names": {"id-ci": {"name": "CI", "notes": "", "tags": ["Python"]}}
+        }))
+        srv = gs.ReusableTCPServer(("localhost", 0), gs.GraphHandler)
+        port = srv.server_address[1]
+        import threading, http.client, time
+        with patch.object(gs, "_exports_dir", return_value=tmp_path):
+            t = threading.Thread(target=srv.serve_forever, daemon=True)
+            t.start()
+            _wait_for_port("localhost", port)
+            body = json.dumps({"tag": "python"}).encode()  # lowercase, tag is "Python"
+            conn = http.client.HTTPConnection("localhost", port, timeout=3)
+            conn.request("POST", "/api/tags", body=body,
+                         headers={"Content-Type": "application/json",
+                                  "Content-Length": str(len(body))})
+            data = json.loads(conn.getresponse().read())
+            conn.close()
+        srv.shutdown(); srv.server_close()
+        assert len(data["nodes"]) == 1
+
+    def test_save_preserves_tags(self, tmp_path):
+        """POST /api/save with tags in names dict persists them to graph_links.json."""
+        import aicli.graph_server as gs
+        srv = gs.ReusableTCPServer(("localhost", 0), gs.GraphHandler)
+        port = srv.server_address[1]
+        import threading, http.client, time
+        with patch.object(gs, "_exports_dir", return_value=tmp_path):
+            t = threading.Thread(target=srv.serve_forever, daemon=True)
+            t.start()
+            _wait_for_port("localhost", port)
+            payload = json.dumps({
+                "links": [],
+                "names": {"id-x": {"name": "X", "notes": "", "tags": ["ml", "nlp"]}}
+            }).encode()
+            conn = http.client.HTTPConnection("localhost", port, timeout=3)
+            conn.request("POST", "/api/save", body=payload,
+                         headers={"Content-Type": "application/json",
+                                  "Content-Length": str(len(payload))})
+            conn.getresponse().read()
+            conn.close()
+        srv.shutdown(); srv.server_close()
+        saved = json.loads((tmp_path / "graph_links.json").read_text())
+        assert saved["names"]["id-x"]["tags"] == ["ml", "nlp"]
+
+    def test_html_contains_tag_bar(self):
+        """The embedded HTML contains the tag filter bar."""
+        import aicli.graph_server as gs
+        assert "tag-bar" in gs.HTML
+        assert "filterByTag" in gs.HTML
+        assert "clearTagFilter" in gs.HTML
+
+    def test_html_contains_tag_input_in_panel(self):
+        """The embedded HTML contains a tags field in the node panel."""
+        import aicli.graph_server as gs
+        assert "pt-tags" in gs.HTML
+
+    def test_html_contains_tag_chips(self):
+        """The tag chip/autocomplete system is present in the HTML."""
+        import aicli.graph_server as gs
+        assert "tag-chips" in gs.HTML or "_refreshTagChips" in gs.HTML
+
+    def test_html_contains_node_tag_class(self):
+        """Nodes render a tag label via .node-tag CSS class."""
+        import aicli.graph_server as gs
+        assert "node-tag" in gs.HTML

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aicli-maxmux"
-version = "1.5.1"
+version = "1.6.0"
 description = "Free, private, terminal-native AI CLI with multi-provider failover, persistent memory, web search, vision, TUI, session graph, and plugin system"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,19 +12,27 @@ dependencies = [
     "cryptography>=42.0.0",
     "click>=8.1.0",
     "tiktoken>=0.7.0",
-    "pytest>=9.0.0",
-    "pytest-asyncio>=0.23",
+    # pytest/pytest-asyncio are in [dev] only — not required to run aicli
 ]
 
 [project.scripts]
 aicli = "aicli.app:main"
+aicli-lite = "aicli.app:main_lite"
 
 [project.optional-dependencies]
+lite = [
+    "cryptography>=42.0.0",
+    "click>=8.1.0",
+    "tiktoken>=0.7.0",
+    "httpx>=0.27.0",
+    "rich>=13.0.0",
+]
 full = [
     "keyring>=25.0.0",
     "httpx>=0.27.0",
     "rich>=13.0.0",
     "tiktoken>=0.7.0",
+    "beautifulsoup4>=4.12.0",
 ]
 rag = [
     "chromadb>=0.5.0",
@@ -36,6 +44,10 @@ tui = [
 proxy = [
     "pysocks>=1.7",
 ]
+web = [
+    "beautifulsoup4>=4.12.0",  # Bing + Mojeek HTML scraping backends
+    "pysocks>=1.7",            # SOCKS5/Tor proxy support
+]
 dev = [
     "pytest>=9.0.0",
     "pytest-asyncio>=0.23",
@@ -46,6 +58,11 @@ dev = [
     "build>=1.2",
     "ruff>=0.4",
 ]
+mcp = [
+    # No external deps required — MCP server uses stdlib only (asyncio, http.server, json)
+    # Optional: install mcp SDK for richer client compatibility
+    # "mcp>=1.0.0",
+]
 all = [
     "keyring>=25.0.0",
     "httpx>=0.27.0",
@@ -55,12 +72,19 @@ all = [
     "sentence-transformers>=3.0",
     "textual>=0.89",
     "pysocks>=1.7",
+    "beautifulsoup4>=4.12.0",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "--tb=short -q"
+addopts = "--tb=short -q -p no:cacheprovider"
+# -p no:cacheprovider  — skip writing .pytest_cache (minor speed gain, safe to remove)
+# Speed tips:
+#   Skip slow HTTP server tests : pytest tests/ -q --ignore=tests/test_serve.py
+#   Only fast unit tests        : pytest tests/ -q -m "not slow"
+#   Stop at first failure       : pytest tests/ -q -x
+#   Parallel (needs xdist)      : pip install pytest-xdist && pytest tests/ -q -n auto
 
 [tool.coverage.run]
 source = ["aicli"]
