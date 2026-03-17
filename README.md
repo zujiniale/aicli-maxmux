@@ -1,9 +1,9 @@
 # aicli-maxmux
 
-![Version](https://img.shields.io/badge/version-1.5.7-ff4488) ![Tests](https://img.shields.io/badge/tests-752%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.11%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80) ![Lite](https://img.shields.io/badge/lite%20mode-%7E20MB-a855f7)
+![Version](https://img.shields.io/badge/version-1.6.0-ff4488) ![Tests](https://img.shields.io/badge/tests-784%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.11%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80) ![Lite](https://img.shields.io/badge/lite%20mode-%7E20MB-a855f7) ![PyPI](https://img.shields.io/badge/pypi-aicli--maxmux-blue)
 
 A free, private, terminal-native AI CLI with multi-provider failover, persistent memory,
-web search, vision support, and autonomous agent mode.
+web search, vision support, autonomous agent mode, and OS function calling.
 
 No vendor lock-in. No single point of failure. All keys stored encrypted locally.
 
@@ -25,27 +25,38 @@ No vendor lock-in. No single point of failure. All keys stored encrypted locally
 | Plugin system — drop `.py` files to extend aicli | `aicli plugin list` |
 | Encrypted key storage, no shell exports | `aicli config set TAVILY_API_KEY tvly-xxxx` |
 | Tor / proxy support | `aicli config set AICLI_PROXY socks5://127.0.0.1:9050` |
+| **OS function calling with audit log** | `aicli do "open hacker news"` |
+| **Smart intent routing** | `aicli "play music and open hacker news"` — no subcommand needed |
+| **@FunctionCall display + dry-run** | `aicli do --dry-run "send email to alice@..."` |
+| **Media browser + picker** | `aicli "browse my music in this dir"` |
 | **Quick shell command shorthand** | `aicli cmd "kill process on port 3000" --run` |
 | **Quick code generation shorthand** | `aicli code "fibonacci" --run` |
 | **Quiet / scriptable output** | `aicli ask -q "what is my IP"` |
-| **Shell hotkey (Ctrl+G)** | `aicli config install-shell` |
+| **Shell hotkeys (Ctrl+G/E/I/L)** | `aicli config install-shell` |
 | **Lite mode (~20MB, no RAG/TUI)** | `pip install aicli-maxmux[lite]` |
 | **Vim-style TUI navigation** | `j/k` scroll · `G/g` top/bottom · `/` search · `dd` delete |
+| **TUI F9 do-mode** | F9 in TUI → OS function calling with confirm toggle |
 | **Graph node tags + filtering** | Tag bar in graph viewer, filter by tag |
 | **Obsidian export** | `aicli export mysession --obsidian > vault/note.md` |
 | **Local HTTP API** | `aicli serve` |
-| **MCP server (Claude Desktop)** | `aicli mcp` · stdio + SSE · 4 tools · 2 resources |
+| **MCP server (Claude Desktop)** | `aicli mcp` · stdio + SSE · 5 tools · 2 resources |
 | **Semantic history search** | `aicli history "query"` — search all past sessions |
 | **Token & message stats** | `aicli stats` · per-session counts · `--top N` |
 | **Background HTTP daemon** | `aicli serve --daemon` · `aicli serve stop` |
 | **Windows shell hotkey (Ctrl+G)** | `aicli config install-shell --shell powershell` |
-| **Atomic version bumping** | `python bump_version.py 1.5.5` |
+| **Atomic version bumping** | `python bump_version.py 1.6.0` |
 | **Context-aware shell hotkey** | Ctrl+G captures tmux scrollback · Ctrl+E auto-fixes last error |
 | **Watch mode (live log AI monitor)** | `tail -f app.log \| aicli ask --watch "alert on ERROR"` |
+| **Watch + auto-do** | `tail -f app.log \| aicli ask --watch "OOM" --do "send_notification ..."` |
 | **Multi-file context attach** | `aicli ask -f error.log -f screenshot.png "what happened"` |
 | **Direct invocation** | `aicli "your prompt"` — no subcommand needed, like `sgpt` |
 | **Zero-config start** | Auto-detects `GROQ_API_KEY`, `OPENROUTER_API_KEY` etc. from env |
 | **pipx compatible** | `pipx install "aicli-maxmux[lite]"` — isolated, no venv needed |
+| **Tool sandboxing** | firejail + 32KB output cap + `--net=none` (`AICLI_SANDBOX=1`) |
+| **Cross-session RAG memory** | ChromaDB semantic retrieval across all past sessions |
+| **Multi-turn `aicli do`** | `aicli do --session myproject "now summarize it"` |
+| **Plugin → TOOL_REGISTRY auto-registration** | Plugin with `"parameters"` available to `aicli do` |
+| **Ctrl+L multi-step chain** | Type task, press Ctrl+L → interactive chain with Y/n per step |
 
 ## Install
 
@@ -101,18 +112,41 @@ aicli setup                      # auto-detects existing env keys too
 # Explicit subcommand form also works
 aicli ask "explain async/await in Python"
 
+# OS function calling — smart intent routing (no subcommand needed)
+aicli "play music and open hacker news"        # auto-routes to do
+aicli "browse my music in this dir"            # opens picker, plays selected file
+aicli do "open https://news.ycombinator.com"   # explicit do subcommand
+
+# Dry-run: see the plan without executing
+aicli do --dry-run "send email to alice@example.com say build passed"
+
+# Multi-turn do (remembers prior steps)
+aicli do --session myproject "open the config file"
+aicli do --session myproject "now summarize it"
+
+# Retry on tool failure
+aicli do --retries 3 "create a Jira ticket for the login bug"
+
 # Quick shell command (new shorthand)
 aicli cmd "find all files larger than 100MB"
 aicli cmd "kill process on port 3000" --run
+
+# Multi-step chain
+aicli cmd --chain "create nginx container mounting index.html"
+# Or press Ctrl+L in your terminal with the task already typed
 
 # Quick code generation (new shorthand)
 aicli code "write a merge sort in Python"
 aicli code "fibonacci function" --run
 
+# Watch mode — live log AI monitor + auto-action
+tail -f app.log | aicli ask --watch "OOM killer invoked" \
+    --do "send_notification title='OOM Alert' body='Check app.log'"
+
 # Quiet / scriptable output
 aicli ask -q "what is today's date"
 
-# Install shell hotkey (Ctrl+G → generates commands in your buffer)
+# Install shell hotkeys (Ctrl+G/E/I/L)
 aicli config install-shell
 
 # Web search (current results)
@@ -159,6 +193,27 @@ aicli-maxmux uses a **3-layer CMA (Contextual Memory Architecture)**:
 Provider failover chain: **Groq → OpenRouter → Gemini → Mistral → Ollama**  
 Adaptive cooldowns: 429 → 5min, 401/403 → 1hr, 5xx → 10-15s
 
+### `aicli do` — OS Function Calling Architecture
+
+```
+aicli "play music and open hacker news"
+        │
+        ▼
+_detect_intent()         ← classifies "do" vs "ask" without subcommand
+        │
+        ▼
+_try_direct_dispatch()   ← ~50ms fast path for unambiguous single-tool commands
+        │ (compound prompt → falls through)
+        ▼
+LLM path                 ← compact tool schema in system prompt, JSON response
+        │
+        ▼
+dispatch_tool_calls()    ← non-blocking tools first, blocking tools (pickers) last
+        │
+        ▼
+@FunctionCall display + execute + audit log + natural summary
+```
+
 ## All Commands
 
 ```bash
@@ -177,168 +232,231 @@ aicli ask --code --run --timeout 60 "prompt"      # custom timeout (seconds)
 aicli ask --lite "prompt"             # lite mode: skip RAG/ChromaDB init
 aicli ask --quiet "prompt"            # quiet mode: raw output only
 aicli ask -q "prompt"                 # quiet shorthand (great for scripting)
+aicli ask --watch "CONDITION"         # streaming stdin AI monitor
+aicli ask --watch "CONDITION" --watch-lines 20   # custom batch size
+aicli ask --watch "CONDITION" --do "tool_call"   # auto-dispatch on trigger
+aicli ask -f file.log "prompt"        # attach file as context
+aicli ask -f img.png -f log.txt "prompt"         # multiple files (mixed)
+aicli ask --terminal-context "..."    # inject terminal scrollback (set by hotkeys)
 
-aicli cmd "prompt"                    # quick shell command (shorthand: ask --shell)
-aicli cmd "prompt" --run              # generate + execute immediately
-aicli cmd "prompt" --dry-run          # print command only, no menu
-aicli cmd "prompt" --lite             # lite + shell
+aicli do "task"                       # OS function calling (auto-routed)
+aicli do --dry-run "task"             # preview tool calls, nothing runs
+aicli do --confirm "task"             # ask [Y/n] before each tool call
+aicli do --retries 3 "task"           # retry failed tools up to 3 times
+aicli do --session NAME "task"        # multi-turn do with session memory
+aicli do --verbose "task"             # show tool count info
+aicli "task"                          # direct invocation — auto-routes to do or ask
 
-aicli code "prompt"                   # quick code generation (shorthand: ask --code)
+aicli cmd "prompt"                    # shell command generation
+aicli cmd "prompt" --run              # generate + execute
+aicli cmd "prompt" --chain            # multi-step chain with Y/n per step
+aicli cmd "prompt" --chain --role "system prompt"   # custom role for chain
+aicli cmd "prompt" --dry-run          # preview only
+
+aicli code "prompt"                   # code generation
 aicli code "prompt" --run             # generate + execute
 aicli code "prompt" --run --language bash   # run as bash
-aicli code "prompt" --run --language node   # run as node.js
-aicli code "prompt" --quiet           # raw code output only
 
-aicli setup                           # interactive first-time setup wizard
+aicli chat                            # interactive multi-turn chat (last session)
+aicli chat --session NAME             # named session
+aicli chat --context                  # inject RAG context
+aicli chat --web                      # web-enhanced chat
+aicli chat --cross-session            # global RAG across all sessions
 
-aicli chat --session NAME             # persistent conversation
-aicli repl                            # interactive REPL
-aicli agent "task"                    # autonomous multi-step execution
-aicli agent --dry-run "task"          # show plan without executing
+aicli tui                             # full Textual TUI
+aicli tui --session NAME              # open specific session
+# TUI hotkeys:
+#   F9         → aicli do mode (OS function calling, confirm toggle via Ctrl+Y)
+#   Ctrl+N     → new session
+#   Ctrl+D     → delete session
+#   Ctrl+W     → toggle web search
+#   Ctrl+X     → toggle RAG context
+#   Ctrl+S     → summarize session
+#   Ctrl+Q     → quit
+#   F2         → range-pick messages
+#   F4         → export session to graph
+#   F5         → import session
+#   j/k        → scroll, G/g top/bottom, / search, dd delete
 
-aicli export SESSION > out.md         # export to markdown
-aicli export SESSION --format json    # export to JSON
-aicli export SESSION --obsidian > note.md          # Obsidian-compatible (YAML + callouts)
-aicli export SESSION --obsidian --include-summary -o ~/vault/SESSION.md
+aicli agent "task"                    # autonomous multi-step agent
+aicli agent --image file.png "task"   # with vision input
 
-aicli config set KEY VALUE            # store any key encrypted
-aicli config get KEY                  # read stored key (masked)
-aicli config set-key PROVIDER         # interactive key entry
-aicli config show                     # show all config + env vars
-aicli config keys                     # show which providers have keys
-aicli config install-shell            # install Ctrl+G shell hotkey (auto-detects zsh/bash)
-aicli config install-shell --shell zsh --hotkey "^L"   # custom shell + hotkey
-
-aicli provider status                 # show provider availability
-aicli provider test groq              # test a specific provider
 aicli session list                    # list all sessions
-aicli session show NAME               # show session messages
-aicli session delete NAME             # delete a session
-aicli index PATH                      # index files for RAG
+aicli session fork NAME               # fork session
+aicli session fork NAME --from-message N --name new-name
+aicli session rename OLD NEW          # rename session
+aicli session summarize NAME          # generate/regenerate summary
+aicli session summarize NAME --print-only --model MODEL
 
-aicli serve                           # start local HTTP API (default: localhost:8765)
-aicli serve --port 9000               # custom port
-aicli serve --host 0.0.0.0            # expose to network (use with caution)
-aicli serve --quiet                   # suppress startup message
-aicli serve --daemon                  # run in background (PID saved to ~/.config/aicli/serve.pid)
-aicli serve stop                      # stop background daemon
+aicli export SESSION                  # export to markdown
+aicli export SESSION --obsidian       # Obsidian-compatible markdown
+aicli export SESSION --include-summary
 
-aicli mcp                             # start MCP server (stdio, for Claude Desktop)
-aicli mcp --transport sse             # SSE transport (browser/network clients)
-aicli tag SESSION tag1,tag2           # tag a session (persisted to graph_links.json)
+aicli history "query"                 # semantic search all past sessions
+aicli stats                           # token + message counts per session
+aicli stats --top 10
 
-aicli history "query"                 # semantic search across all past sessions
-aicli history "query" --results 10   # more results
-aicli history "query" --min-score 0.3 # adjust similarity threshold
+aicli plugin list                     # list loaded plugins
+aicli plugin run NAME ARG             # invoke plugin directly
+aicli plugin errors                   # show failed plugin loads
+aicli plugin doc NAME                 # show plugin description, version, source
+aicli plugin install URL [--name]     # download + install plugin from URL
+# Plugin auto-registration: plugins with "parameters" key auto-register into TOOL_REGISTRY
+# → available to aicli do and the LLM's function-calling system
 
-aicli stats                           # all sessions: message + token counts
-aicli stats --session NAME            # single session detail
-aicli stats --top 5                   # top 5 sessions by message count
+aicli tools list                      # list all registered OS tools
+aicli tools audit                     # show tool call history (JSONL audit log)
 
-aicli graph                           # session graph viewer (browser)
+aicli config set KEY VALUE            # store key in OS keychain + Fernet file
+aicli config get KEY                  # read stored key (masked)
+aicli config set-key groq             # interactive key entry for named provider
+aicli config install-shell            # install zsh/bash hotkeys (Ctrl+G/E/I/L)
+aicli config install-shell --shell powershell   # Windows PowerShell
+aicli config migrate-keys             # migrate keys from keyring to Fernet backup
+aicli config show                     # show all config + optional env vars
+
+aicli setup                           # interactive first-run wizard
+
+aicli tag SESSION TAG                 # tag a session
+
+aicli graph                           # start graph server + open browser
 aicli graph --port 8080               # custom port
-aicli graph --no-browser              # no auto-open
+aicli graph --no-browser              # headless use
 
-aicli plugin list                     # list installed plugins
-aicli plugin run NAME ARG             # run a plugin
-aicli plugin install URL              # install plugin from URL
-aicli plugin doc NAME                 # show plugin details
-aicli plugin errors                   # show load errors
+aicli serve                           # local HTTP API on :8765
+aicli serve --daemon                  # background daemon with PID file
+aicli serve stop                      # stop background daemon
+aicli serve --port 9000               # custom port
+aicli serve --quiet                   # suppress startup banner
 
-./start.sh                            # open TUI + graph together
+aicli mcp                             # MCP server (stdio + SSE) for Claude Desktop
+# 5 tools: ask, cmd, do, search_history, get_session
+# 2 resources: sessions list, individual session messages
 ```
 
+## Shell Hotkeys
 
-## Terminal UI (TUI)
+Install with `aicli config install-shell` (adds one `source` line to `~/.zshrc` / `~/.bashrc`).
+
+| Hotkey | What It Does |
+|--------|-------------|
+| **Ctrl+G** | Suggest a shell command for what you typed (tmux-aware: sees actual terminal output) |
+| **Ctrl+E** | Auto-fix last failed command — captures error, gets fix, pastes into buffer |
+| **Ctrl+I** | Suggest next command based on what just ran (reads tmux scrollback) |
+| **Ctrl+L** | Run current buffer as multi-step chain — each step asks Y/n before executing |
+
+Ctrl+G empty buffer: inline `aicli>` prompt. Non-empty: uses typed text as the task.
+Ctrl+L empty buffer: shows `aicli chain>` prompt. Non-empty: `aicli cmd --chain "$BUFFER"`.
+
+> Users where Ctrl+L conflicts with clear-screen: uncomment the `Alt+L` rebind line in `shell_integration.zsh`.
+
+## OS Function Calling (`aicli do`)
+
+### Available Tools
+
+| Tool | What It Does | Example |
+|------|-------------|---------|
+| `play_music` | Play any audio/video file or launch media player | `aicli "play ~/Music/Wired.mp3"` |
+| `browse_media` | Numbered picker for audio/video files in a directory | `aicli "browse my music in this dir"` |
+| `open_url_in_browser` | Open URL in default system browser | `aicli "open hacker news"` |
+| `run_shell_command` | Run a shell command with optional sandbox + working_dir | `aicli do "list processes using port 8080"` |
+| `send_email` | Send email via system mail client (address validated) | `aicli do "send email to alice@... say build passed"` |
+| `get_system_info` | CPU, memory, disk, uptime | `aicli do "get system info"` |
+| `send_notification` | Desktop notification | `aicli do "notify me the build is done"` |
+| Custom plugins | Any plugin with `"parameters"` auto-registers | `aicli do "create a Jira ticket for..."` |
+
+### Flags
 
 ```bash
-aicli tui                        # open TUI
-aicli tui --session myproject    # open specific session
-aicli tui --no-history           # open without loading past messages
+aicli do "task"                  # executes immediately (auto_confirm=True default)
+aicli do --confirm "task"        # ask [Y/n] before each tool call
+aicli do --dry-run "task"        # show @FunctionCall plan, nothing executes
+aicli do --retries 3 "task"      # retry failed tools up to 3 times
+aicli do --session NAME "task"   # multi-turn with memory of prior do calls
+aicli do --verbose "task"        # show tool count alongside @FunctionCall output
 ```
 
-### TUI Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| **F1** | Help overlay |
-| **F2** | Range select (click start → click end → Ctrl+Y) |
-| **F3** | Cycle theme (Tokyo Night / Dracula / Gruvbox / Nord / Solarized) |
-| **F4** | Export session to timestamped `.md` + `.json` |
-| **F5** | Import latest exported session JSON into current session |
-| **F6** | Sync all data to exports folder |
-| **F7** | Open graph viewer in browser |
-| **Ctrl+N** | New session |
-| **Ctrl+D** | Delete session (or bulk) |
-| **Ctrl+K** | Pin / unpin session |
-| **Ctrl+B** | Toggle bulk select mode |
-| **Ctrl+E** | Export to markdown (single or bulk) |
-| **Ctrl+J** | Backup all sessions to JSON |
-| **Ctrl+I** | Import from most recent backup |
-| **Ctrl+W** | Toggle web search |
-| **Ctrl+X** | Toggle RAG context |
-| **Ctrl+S** | Summarize current session |
-| **Ctrl+Y** | Copy message to clipboard |
-| **Ctrl+R** | Copy typed range (e.g. type `3-7` then Ctrl+R) |
-| **Ctrl+O** | Open exports folder |
-| **Ctrl+9** | Settings (export path + hotkey remapping) |
-| **Ctrl+Q** | Quit |
-| **Enter** | Send message |
-| **Ctrl+Enter** | Insert newline (multiline messages) |
-| **Esc** | Clear range select |
-
-### Vim Navigation (when input not focused)
-
-| Key | Action |
-|-----|--------|
-| **j** | Scroll chat down |
-| **k** | Scroll chat up |
-| **G** | Jump to bottom |
-| **g** | Jump to top |
-| **/*** | Focus session search |
-| **dd** | Delete session (press d twice) |
-
-Requires: `pip install textual`
-
-## MCP Server (Claude Desktop)
+### Direct Invocation (Smart Routing)
 
 ```bash
-aicli mcp                    # stdio transport — use with Claude Desktop
-aicli mcp --transport sse    # SSE transport — browser / network clients
+# These auto-route to "do" (action intent detected):
+aicli "play ~/Music/Wired.mp3"
+aicli "open hacker news"
+aicli "browse my music in this dir"
+aicli "send email to alice@example.com just say hi"
+aicli "play music and open hacker news"   # compound → LLM dispatches both
+
+# These auto-route to "ask" (question/explanation intent detected):
+aicli "explain async/await"
+aicli "what is a load balancer"
+aicli "how does TCP work"
+aicli "write a function that sorts a list"   # LLM instruction → ask
 ```
 
-Exposes aicli as a Model Context Protocol server so Claude Desktop can call your local AI pipeline, manage sessions, and tag conversations.
+### Audit Log
 
-**Claude Desktop config** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-```json
-{
-  "mcpServers": {
-    "aicli": { "command": "aicli", "args": ["mcp"] }
-  }
-}
+Every tool call is logged to `~/.config/aicli/tool_audit.jsonl`:
+```bash
+aicli tools audit            # view in terminal
+cat ~/.config/aicli/tool_audit.jsonl | tail -5   # raw JSONL
 ```
 
-| Tool | Description |
-|------|-------------|
-| `ask` | Full AI prompt via provider pipeline |
-| `cmd` | Shell command generation (auto-strips fences) |
-| `code` | Code generation (correct JS/TS/Node.js casing) |
-| `tag` | Tag a session — merges, never overwrites |
+### Sandboxing
 
-| Resource | URI |
-|----------|-----|
-| Session list | `sessions://list` |
-| Session messages | `sessions://{session_id}` |
+Enable firejail sandboxing for `run_shell_command`:
+```bash
+export AICLI_SANDBOX=1   # requires firejail on PATH
+# → --quiet --noprofile --noroot --private-tmp --net=none
+# → 32KB output cap (truncated with message)
+export AICLI_SANDBOX_NET=1   # allow network access inside sandbox
+```
+
+### Plugin Auto-Registration
+
+Plugins with a `"parameters"` key are automatically available to `aicli do`:
+
+```python
+# ~/.config/aicli/plugins/jira.py
+def register():
+    return {
+        "name": "create_jira_ticket",
+        "description": "Create a Jira ticket with title and description",
+        "parameters": {
+            "title": {"type": "string", "description": "Ticket title"},
+            "description": {"type": "string", "description": "Ticket body"},
+        },
+        "confirm": True,
+        "fn": create_jira_ticket,
+    }
+```
+
+After dropping this file in `~/.config/aicli/plugins/`:
+```bash
+aicli do "create a ticket for the login bug"
+# → @FunctionCall create_jira_ticket(title='Fix login bug', description='...')
+```
+
+## Architecture
+
+aicli-maxmux uses a **3-layer CMA (Contextual Memory Architecture)**:
+
+```
+🔥 Hot Layer   — in-memory context for current session
+🌡️ Warm Layer  — SQLite + Fernet encrypted persistent history
+❄️ Cold Layer  — ChromaDB vector embeddings for semantic RAG
+```
+
+Provider failover chain: **Groq → OpenRouter → Gemini → Mistral → Ollama**  
+Adaptive cooldowns: 429 → 5min, 401/403 → 1hr, 5xx → 10-15s
 
 ## Local HTTP API (`aicli serve`)
 
 ```bash
-aicli serve                    # start on localhost:8765
+aicli serve                    # start on :8765
+aicli serve --daemon           # background daemon
 aicli serve --port 9000        # custom port
 aicli serve --quiet            # suppress startup banner
 ```
-
-Exposes aicli as a local REST API for scripting, tool integration, and MCP-style access.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -353,22 +471,6 @@ Exposes aicli as a local REST API for scripting, tool integration, and MCP-style
 **Request body (POST /ask):**
 ```json
 { "prompt": "explain async/await", "web": false, "lite": false, "model": null }
-```
-
-**Example:**
-```bash
-# Ask
-curl -s http://localhost:8765/ask \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "what is 2+2"}'
-
-# Shell command
-curl -s http://localhost:8765/ask/shell \
-  -d '{"prompt": "find all log files"}' \
-  -H "Content-Type: application/json"
-
-# Health check
-curl -s http://localhost:8765/health | jq .
 ```
 
 ## Session Graph
@@ -433,6 +535,8 @@ Tor/proxy support works out of the box — Tavily is used as the primary backend
 - API keys stored in OS keychain (libsecret / keychain) **and** encrypted Fernet file as fallback
 - No telemetry, no cloud sync, no ads
 - Tor/proxy support: `aicli config set AICLI_PROXY socks5://127.0.0.1:9050`
+- Tool sandboxing via firejail (`AICLI_SANDBOX=1`): `--private-tmp --net=none`, 32KB output cap
+- Tool audit log: every `aicli do` call logged to `~/.config/aicli/tool_audit.jsonl`
 
 ## Install Modes
 
@@ -456,6 +560,8 @@ All commands work in lite mode except `--context` (RAG) and `aicli tui`.
 | `AICLI_{PROVIDER}_KEY` | Set API key via env (CI/CD friendly) |
 | `TAVILY_API_KEY` | Tavily web search key (optional, 1000/mo free) |
 | `AICLI_PROXY` | Proxy/Tor (e.g. `socks5://127.0.0.1:9050`) |
+| `AICLI_SANDBOX=1` | Enable firejail sandboxing for `run_shell_command` |
+| `AICLI_SANDBOX_NET=1` | Allow network access inside sandbox (removes `--net=none`) |
 
 ## Requirements
 
@@ -463,12 +569,17 @@ All commands work in lite mode except `--context` (RAG) and `aicli tui`.
 - Optional: `pip install aicli-maxmux[all]` for RAG + TUI
 - Optional: `pip install aicli-maxmux[lite]` for minimal footprint (~20MB)
 - Optional: `sudo apt install xclip` for TUI clipboard on Linux (Ctrl+Y)
+- Optional: `sudo apt install firejail` for tool sandboxing (`AICLI_SANDBOX=1`)
 
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
-**Latest: v1.5.7** — context-aware Ctrl+G (tmux scrollback) · Ctrl+E error-fix hotkey · `--watch` streaming log monitor · `--file/-f` multi-file context · LLM-optimal injection order · 703 tests · 530 static checks · v1.5.5: patch fixes (`ContextRetriever` binding, stale `/tmp/` cleanup) · v1.5.4: MCP server · `aicli history` · `aicli stats` · `aicli serve --daemon` · PowerShell Ctrl+G
+**Latest: v1.6.0** — `_detect_intent` smart routing · `@FunctionCall` display · silent execution by default · Ctrl+L chain widget (zsh + bash) · direct dispatch fast path (~50ms) · `play_music`/`browse_media` overhaul · tool sandboxing · TUI DoModeScreen confirm toggle · `beautifulsoup4` + `[web]` extra · 784 pytest + 14 slow RAG · 786 static checks · **published to PyPI 2026-03-16**
+
+**v1.5.7** — `_FallbackGroup` Click fix · `--retries`/`--session`/`--do` flags · plugin TOOL_REGISTRY auto-registration · DoModeScreen F9 · `run_shell_command` working_dir · 759 tests
+
+**v1.5.6** — context-aware Ctrl+G (tmux scrollback) · Ctrl+E error-fix hotkey · `--watch` streaming log monitor · `--file/-f` multi-file context · 703 tests · v1.5.5: patch fixes
 
 ## Roadmap
 
@@ -484,7 +595,6 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 | v1.5.3 | Vim navigation in TUI (`j/k/G/g/dd//`) | ✅ Done |
 | v1.5.3 | Obsidian export (`--obsidian`) | ✅ Done |
 | v1.5.3 | Graph node tags + tag filtering | ✅ Done |
-| v1.5.3 | Tests: `TestServe`, `TestWebSearch`, `TestNewCommands`, `TestVimNav`, `TestNodeTags`, `TestObsidianExport` | ✅ Done |
 | v1.5.4 | MCP server (Claude Desktop integration) | ✅ Done |
 | v1.5.4 | `aicli tag` CLI shorthand | ✅ Done |
 | v1.5.4 | 669 passing tests + 467 static checks | ✅ Done |
@@ -495,19 +605,258 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 | v1.5.4 | Windows shell integration (`shell_integration.ps1`) | ✅ Done |
 | v1.5.4 | `bump_version.py` atomic version update | ✅ Done |
 | v1.5.4 | `aicli config install-shell --shell powershell` | ✅ Done |
-| v1.5.5 | `ContextRetriever` module-level binding — patchable in tests (`app.py`, `mcp_server.py`) | ✅ Done |
+| v1.5.5 | `ContextRetriever` module-level binding — patchable in tests | ✅ Done |
 | v1.5.5 | Stale `/tmp/` source path auto-cleanup in `config install-shell` | ✅ Done |
-| v1.5.5 | `test_history_handles_no_chromadb` — `side_effect=ImportError` → `patch to None` fix | ✅ Done |
-| v1.5.5 | Phase 5 config import consolidation (`CHROMA_DIR` merged into single import line) | ✅ Done |
-| v1.5.5 | 490+ static checks · `pathlib.Path.home()` patched in install-shell test | ✅ Done |
+| v1.5.5 | 490+ static checks | ✅ Done |
 | v1.5.6 | Context-aware Ctrl+G — tmux scrollback injected as `--terminal-context` | ✅ Done |
 | v1.5.6 | Ctrl+E error-fix hotkey — auto-diagnose last failed command (zsh + bash) | ✅ Done |
-| v1.5.6 | `--watch` streaming mode — real-time AI log monitor (`tail -f \| aicli ask --watch`) | ✅ Done |
-| v1.5.6 | `--file/-f` multi-file context — attach any text/log/code file to prompt | ✅ Done |
+| v1.5.6 | `--watch` streaming mode — real-time AI log monitor | ✅ Done |
+| v1.5.6 | `--file/-f` multi-file context | ✅ Done |
 | v1.5.6 | LLM-optimal injection order: RAG → TC → files → web | ✅ Done |
 | v1.5.6 | 703 pytest tests · 530 static checks | ✅ Done |
+| v1.5.7 | `_FallbackGroup` Click fix · `--retries`/`--session`/`--do` flags | ✅ Done |
+| v1.5.7 | Plugin TOOL_REGISTRY auto-registration | ✅ Done |
+| v1.5.7 | DoModeScreen F9 TUI + `run_shell_command` working_dir | ✅ Done |
+| v1.5.7 | 759 pytest tests · 717 static checks | ✅ Done |
+| v1.6.0 | `_detect_intent` smart routing + `@FunctionCall` format | ✅ Done |
+| v1.6.0 | Ctrl+L chain widget (zsh + bash) | ✅ Done |
+| v1.6.0 | Direct dispatch fast path (~50ms single-tool commands) | ✅ Done |
+| v1.6.0 | `play_music` + `browse_media` full overhaul | ✅ Done |
+| v1.6.0 | Tool sandboxing (firejail + 32KB cap) | ✅ Done |
+| v1.6.0 | End-to-end RAG test suite (18 `@pytest.mark.slow`) | ✅ Done |
+| v1.6.0 | `beautifulsoup4` in `[full]`/`[all]` + new `[web]` extra | ✅ Done |
+| v1.6.0 | 784 pytest (non-slow) + 14 slow · 786 static checks | ✅ Done |
+| v1.6.0 | **Published to PyPI** — `pip install aicli-maxmux==1.6.0` | ✅ Done |
 | v1.5.x | Missing TUI widget tests (`TestTUI` live render) | 📋 Scoped |
 | v1.5.x | `aicli serve --daemon` Windows port (os.fork is Unix-only) | 📋 Scoped |
+| v1.7.x | Next feature cycle | 🔜 Upcoming |
+
+---
+
+## Lite Mode — Run AI Anywhere
+
+aicli-maxmux was designed from the ground up to work in constrained environments. The **lite install** strips everything non-essential and gets you a fully functional AI CLI in about 20MB.
+
+```bash
+pipx install "aicli-maxmux[lite]"   # ~20MB, isolated, no venv needed
+aicli-lite "explain this error"      # works immediately if any API key is set
+```
+
+**What lite mode includes:**
+- Full provider chain: Groq → OpenRouter → Gemini → Mistral → Ollama
+- All CLI flags: `ask`, `cmd`, `code`, `chat`, `do`, `session`, `export`, `serve`
+- Shell hotkeys: Ctrl+G, Ctrl+E, Ctrl+I, Ctrl+L
+- Encrypted key storage, quiet mode, direct invocation
+- Web search (`--web`) and file context (`-f`)
+
+**What lite mode skips (optional):**
+- ChromaDB RAG (`--context`) — add with `pip install "aicli-maxmux[rag]"`
+- Textual TUI (`aicli tui`) — add with `pip install "aicli-maxmux[tui]"`
+- Web scraping backends — add with `pip install "aicli-maxmux[web]"`
+
+**Install only what you need:**
+
+| Extra | Command | Adds |
+|-------|---------|------|
+| `[lite]` | `pip install "aicli-maxmux[lite]"` | Core only (~20MB) |
+| `[web]` | `pip install "aicli-maxmux[web]"` | Bing + Mojeek scraping, Tor/SOCKS5 |
+| `[rag]` | `pip install "aicli-maxmux[rag]"` | ChromaDB + sentence-transformers |
+| `[tui]` | `pip install "aicli-maxmux[tui]"` | Textual terminal UI |
+| `[mcp]` | `pip install "aicli-maxmux[mcp]"` | MCP server for Claude Desktop |
+| `[all]` | `pip install "aicli-maxmux[all]"` | Everything (~468MB) |
+| `[dev]` | `pip install "aicli-maxmux[dev]"` | All + test tools |
+
+Lite mode is the default recommendation for most users. The full install is only needed if you specifically want RAG or the TUI.
+
+---
+
+## Modularity — Built to Extend
+
+aicli-maxmux is not a monolith. Every layer is independently replaceable or extendable.
+
+### Drop-in provider replacement
+The provider chain is just a list in your config. Override it per-session or globally:
+```bash
+aicli ask --model gemini/gemini-2.0-flash "explain this"
+AICLI_PROVIDER_CHAIN=ollama,groq aicli "local first, cloud fallback"
+```
+
+### Plugin system
+Drop a `.py` file into `~/.config/aicli/plugins/` and it's immediately available to `aicli do`:
+```python
+# ~/.config/aicli/plugins/jira.py
+def register():
+    return {
+        "name": "create_jira_ticket",
+        "description": "Create a Jira ticket",
+        "parameters": {"title": {"type": "string"}, "priority": {"type": "string"}},
+        "confirm": True,
+        "fn": create_ticket,
+    }
+```
+```bash
+aicli do "create a high priority ticket for the login bug"
+# → @FunctionCall create_jira_ticket(title='Fix login bug', priority='high')
+```
+No restart required. No registration step. No core file changes.
+
+### Custom roles
+```bash
+aicli ask --role devops "explain this Kubernetes error"
+aicli cmd --chain --role "You are a senior SRE" "harden this nginx config"
+```
+
+### Local HTTP API
+```bash
+aicli serve   # starts REST API on :8765
+curl -s http://localhost:8765/ask -d '{"prompt": "what is async/await"}' -H "Content-Type: application/json"
+```
+Scripting, CI/CD integration, third-party tools — all without touching the CLI directly.
+
+### MCP server for Claude Desktop
+```bash
+aicli mcp   # stdio MCP server
+```
+```json
+{"mcpServers": {"aicli": {"command": "aicli", "args": ["mcp"]}}}
+```
+Claude Desktop gets access to all 5 tools: `ask`, `cmd`, `do`, `search_history`, `get_session`.
+
+---
+
+## Privacy & Security — No Compromises
+
+aicli-maxmux was built with the assumption that your data, keys, and conversations belong to you and no one else.
+
+### Everything stays local
+- All conversation history is **AES-128-CBC encrypted** (Fernet) on disk
+- Encryption keys are derived from your machine fingerprint — no master password needed
+- No telemetry. No analytics. No cloud sync. No ads. Ever.
+- Sessions are stored in `~/.config/aicli/sessions.db` — yours, encrypted, offline
+
+### API key storage
+- Keys stored in the **OS keychain** (libsecret on Linux, Keychain on macOS) — not in shell config files, not in `.env`, not in plaintext
+- Fernet-encrypted file backup for headless environments (CI/CD, Tor, no D-Bus session)
+- Keys never appear in shell history — `aicli config set-key groq` uses masked input
+- `aicli config get KEY` shows only first 8 + last 4 characters
+
+### Tool sandboxing
+When running OS tools via `aicli do`, you can enforce strict isolation:
+```bash
+export AICLI_SANDBOX=1   # requires firejail
+# Every run_shell_command call gets:
+#   --quiet --noprofile --noroot --private-tmp --net=none
+#   + 32KB output cap (prevents prompt-flooding)
+export AICLI_SANDBOX_NET=1   # allow network inside sandbox if needed
+```
+
+### Confirmation gate
+```bash
+aicli do --confirm "delete logs older than 30 days"
+# → @FunctionCall delete_old_logs(days=30)
+#   Delete log files older than 30 days.
+#   Run? [Y/n]
+```
+By default, `aicli do` executes immediately (matching ShellGPT UX). Add `--confirm` for any destructive action — every tool call is gated individually.
+
+### Audit log
+Every tool execution is appended to `~/.config/aicli/tool_audit.jsonl`:
+```json
+{"ts": "2026-03-16T19:30:00", "tool": "run_shell_command", "args": {"command": "rm -rf /tmp/cache"}, "result": "ok", "session": "myproject"}
+```
+```bash
+aicli tools audit          # view in terminal
+aicli tools audit --tool run_shell_command   # filter by tool
+```
+Tamper-evident. Append-only. Stays local.
+
+### Tor / proxy support
+```bash
+aicli config set AICLI_PROXY socks5://127.0.0.1:9050
+aicli ask --web "..."   # all requests routed through Tor
+# SearXNG auto-skipped over Tor (avoids rate-limit blocks)
+# Tavily used as primary backend over SOCKS5
+```
+
+---
+
+## Interface & UX — Designed for the Terminal
+
+aicli-maxmux treats the terminal as a first-class interface, not an afterthought.
+
+### Smart intent routing
+No need to remember subcommands. Just type naturally:
+```bash
+aicli "play music and open hacker news"      # → do (action)
+aicli "explain async/await"                  # → ask (question)
+aicli "browse my music in this dir"          # → do (direct dispatch, ~50ms)
+aicli "summarize /tmp/report.txt"            # → do (path detected)
+```
+
+### Shell hotkeys — zero friction
+```
+Ctrl+G   → suggest a command for what you typed (tmux-aware: sees actual output)
+Ctrl+E   → auto-fix last failed command — captures error, generates fix, pastes into buffer
+Ctrl+I   → suggest next command based on what just ran
+Ctrl+L   → run current buffer as multi-step chain (Y/n per step)
+```
+Every hotkey works in both **zsh and bash**. Context-aware: Ctrl+G in tmux reads your actual terminal output, not just shell history — so it sees the error message without you having to describe it.
+
+### @FunctionCall display
+```
+@FunctionCall play_music(query='~/Music/Wired.mp3')
+  Play music or media using the system's default media player.
+✓ Playing via mpv: /home/dev/Music/Wired.mp3
+```
+Clean, recognisable to ShellGPT users, more informative — shows the description line and execution result.
+
+### Multi-step chains
+```bash
+aicli cmd --chain "create index.html with hello world, spin up nginx container mounting it"
+# [1/3] touch index.html          Run? [Y/n]
+# [2/3] echo "<h1>hello world</h1>" > index.html   Run? [Y/n]
+# [3/3] docker run -d -p 80:80 -v $(pwd)/index.html:/usr/share/nginx/html/index.html nginx   Run? [Y/n]
+```
+Or just press **Ctrl+L** with the task typed in your buffer.
+
+### Full TUI
+```bash
+aicli tui
+```
+- Left sidebar: all sessions with message counts, click to switch
+- Scrollable chat with role colours and syntax highlighting
+- F9 → OS function calling (DoModeScreen) with live confirm toggle (Ctrl+Y)
+- F1 help · F2 range-select · F3 theme cycle · F4 export · F5 import · F6 sync
+- Vim navigation: `j/k` scroll · `G/g` top/bottom · `/` search · `dd` delete
+- 5 built-in themes: Tokyo Night · Dracula · Gruvbox · Nord · Solarized Dark
+- Real clipboard: `wl-copy` → `xclip` → `xsel` → `pbcopy` chain
+
+### Watch mode — AI as a live monitor
+```bash
+tail -f /var/log/syslog | aicli ask --watch "alert on OOM killer"
+# → silent until condition fires
+# [ALERT 19:42:07] OOM killer invoked — process nginx (PID 1234) killed
+
+# Automatically take action on trigger:
+journalctl -f | aicli ask --watch "disk usage above 90%" \
+    --do "get_system_info detail=disk"
+```
+
+### Output modes
+```bash
+aicli ask -q "what is my IP"        # quiet: raw output only, no chrome — pipe-friendly
+aicli ask --lite "explain this"     # lite: skip RAG init, faster cold start
+aicli do --dry-run "send email..."  # dry-run: show @FunctionCall plan, nothing executes
+aicli do --verbose "..."            # verbose: show tool count alongside output
+```
+
+### Session graph
+```bash
+aicli graph   # D3 force-directed graph of all your sessions, opens in browser
+```
+Link sessions, add notes, filter by tag, explore connections. Sessions exported via F4 in the TUI appear automatically.
+
+---
 
 ## License
 

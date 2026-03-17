@@ -1,15 +1,287 @@
 # Changelog
 
-## [1.5.7] — 2026-03-16
-
-### Added
-
-*(fill in release notes)*
+All notable changes to aicli-maxmux are documented here.
 
 ---
 
+## [1.6.0] — 2026-03-16 (Session 16 — ShellGPT full parity + decisive wins) 🚀 Published to PyPI
 
-All notable changes to aicli-maxmux are documented here.
+### Added
+
+#### `aicli/app.py` — Smart intent routing (`_detect_intent`)
+
+- **`_detect_intent(prompt) -> str`**: Classifies any free-form prompt as `"do"` (function call / OS action) or `"ask"` (text answer) without requiring the user to pick a subcommand — matching ShellGPT's `sgpt "..."` UX while adding the full audit/confirm/retry stack underneath.
+  - Tight action verbs that always → `do`: `play`, `open`, `send`, `delete`, `kill`, `install`, `notify`, `launch`, `start`, `stop`, `restart`
+  - Disambiguated verbs (require OS-flavoured object): `copy` (needs "to clipboard"/"file"), `write` (needs "to/into"/extension), `create` (needs docker/container/file/dir/extension), `run` (needs docker/nginx/.py/.sh), `move` (needs filepath pattern), `save` (needs filepath/extension)
+  - Filesystem path present anywhere in prompt (`/absolute` or `~/home`) → `do`
+  - Query words (`what`, `why`, `how`, `explain`, `describe`, `tell me`, `summarize` without path) → `ask`
+  - Domain keywords without query word → `do`
+  - Default: `ask`
+  - 34 edge cases validated including 12 verb-disambiguation cases that prevent routing LLM instruction prompts (`"write a function"`, `"create a mental model"`) to `do`
+
+- **`--confirm` flag on `aicli do`**: Opt-in confirmation gate. Default is now silent execution (matches ShellGPT). Use `--confirm` for destructive actions.
+  ```bash
+  aicli do "open hacker news"                    # fires immediately
+  aicli do --confirm "delete logs older than 7d"  # asks [Y/n] per step
+  aicli do --dry-run "send email to alice@..."    # preview only, nothing runs
+  ```
+
+- **`--verbose` flag on `aicli do`**: Opt-in tool count display. Default is silent until `@FunctionCall` lines appear.
+
+- **`_COMPOUND_RE` compound prompt guard** in `_try_direct_dispatch`: Detects `and/also/then/plus` in prompt — compound prompts bypass the fast path and go to the LLM which dispatches all tools in one JSON response.
+
+#### `aicli/tools/executor.py` — @FunctionCall format + direct dispatch + pipeline fix
+
+- **`@FunctionCall` display format**: `_format_tool_call()` now outputs `@FunctionCall play_music(query='classical')` with the tool description on the next line — identical to ShellGPT's visual style, more informative.
+
+- **`auto_confirm=True` default** (was `False`): On the `auto_confirm` path, prints `@FunctionCall tool(args)` + description then executes silently — no `[Y/n]` pause.
+
+- **Dry-run header**: `Dry-run plan: N tools available` shown before listing each call with description. `--verbose` flag restores the tool count line for non-dry-run calls.
+
+- **`_try_direct_dispatch(prompt_text)` fast path**: For unambiguous single-tool commands, dispatches directly without an LLM round-trip (~50ms vs ~1–2s):
+  | Pattern | Tool | Time |
+  |---------|------|------|
+  | `browse my music in this dir` | `browse_media(directory=cwd)` | ~50ms |
+  | `play ~/Music/file.mp3` | `play_music(query=path)` | ~50ms |
+  | `open https://...` | `open_url_in_browser(url=url)` | ~50ms |
+  | `get system info` | `get_system_info()` | ~50ms |
+
+- **Compact tool schema** (~2,100 chars vs ~5,600 chars full): Tool names + 80-char description + param names only embedded in system prompt. Prevents LLM response truncation on multi-tool prompts.
+
+- **Robust JSON response parser**: `re.search` finds JSON array anywhere in response (handles LLM preamble text), strips ``` fences, falls back to plain text.
+
+- **Few-shot system prompt examples**: Single-tool, multi-tool, and question examples embedded so the LLM always returns clean JSON.
+
+- **Blocking-tools-last dispatch ordering**: `browse_media` (and any tool using `input()`) sorted to run after all non-blocking tools in compound prompts. For `"browse my music and open hacker news"` → browser opens first, then picker menu.
+
+- **Pipeline compatibility fix**: `ProviderPipeline.complete()` is text-only — removed `tools=tool_schemas` kwarg that was causing `TypeError`. Tool schemas embedded in system prompt instead.
+
+- **`tool_schemas` assignment moved** before system prompt block — fixes `UnboundLocalError: cannot access local variable 'tool_schemas'`.
+
+#### `aicli/tools/os_functions.py` — play_music + browse_media overhaul
+
+- **`play_music` — full format support**:
+  - `~` expansion bug fixed: was passing raw unexpanded `~` string to mpv subprocess. Now uses `play_target = str(file_path)` after `Path(query).expanduser()`.
+  - Empty query: scans cwd → `~/Music` → `~/Videos` for media files, launches `mpv file1.mp3 file2.mp3 ...` as playlist. Opens `mpv --idle` if nothing found.
+  - Player fallback chain: `playerctl` → `mpv` → `vlc/cvlc` → `rhythmbox` → `xdg-open`
+  - macOS: `afplay` / `open`. Windows: `os.startfile`.
+  - Supports any format: `.mkv`, `.mp4`, `.mp3`, `.flac`, `.wav`, `.ogg`, etc.
+
+- **`browse_media` — smart directory picker**:
+  - Current directory detection: "this dir", "here", "current directory", "." → `Path.cwd()`
+  - Fast path passes `str(Path.cwd())` absolute path — no ambiguity in subprocess.
+  - Auto-play single file: if only 1 file found, plays immediately without menu.
+  - Improved numbered picker UI with file size and format columns.
+  - Scans cwd first, falls back to `~/Music`, `~/Videos`, `~/Downloads`.
+  - `filter: audio` or `filter: video` narrows results.
+  - `_detect_intent` updated: `"browse my music"`, `"show me my video files"`, `"pick a song to play"`, `"list my music files"`, `"play the song in this directory"` all route to `do`.
+
+- **Tool sandboxing** (from S15, now in `os_functions.py`):
+  - `MAX_OUTPUT_BYTES = 32_768` — 32 KB output cap, truncation message appended
+  - `_sandbox_available()` — checks `AICLI_SANDBOX=1` env var AND `firejail` on PATH
+  - `_build_sandboxed_cmd()` — `--quiet --noprofile --noroot --private-tmp --net=none` by default; `AICLI_SANDBOX_NET=1` removes `--net=none`
+  - Sandboxed path uses `shell=False` (list args); unsandboxed retains `shell=True`
+
+#### `aicli/shell_integration.zsh` + `aicli/shell_integration.bash` — Ctrl+L chain widget
+
+- **`_aicli_chain_widget` (zsh) / `_aicli_chain` (bash)**: Bound to Ctrl+L.
+  - Empty buffer: shows inline `aicli chain>` prompt
+  - Non-empty buffer: runs `aicli cmd --chain "$BUFFER"` in foreground for interactive `[1/3] ... [Y/n]` confirmations — matches ShellGPT Video 2 exactly
+  - Comment included for Alt+L rebind (users where Ctrl+L conflicts with clear-screen)
+  - Both shells now have full hotkey parity: Ctrl+G, Ctrl+E, Ctrl+I, Ctrl+L
+
+#### `aicli/tui.py` — DoModeScreen confirm toggle (from S15, finalised S16)
+
+- Ctrl+Y → `action_toggle_confirm` — switches between auto-confirm and dry-run mode live
+- `_auto_confirm` state variable (default `True`)
+- Mode label widget shows current mode
+- `dismiss((prompt, auto_confirm))` tuple — caller receives both values
+- `_run_do_command(prompt, *, auto_confirm=True)` — `dry_run=not auto_confirm` wired through
+
+### Tests
+
+- **`TestIntentRouting`** (24 tests): 13 action prompts → `'do'`, 7 query prompts → `'ask'`, 4 CLI integration tests; 12 disambiguation edge cases
+- **`TestDoCommandUX`** (6 tests): `--confirm` flag, `auto_confirm=True` default, `--verbose` flag, dry-run header, `@FunctionCall` format on auto-confirm path
+- **`TestCtrlLChainWidget`** (7 tests): `_aicli_chain_widget` defined in zsh, `_aicli_chain` defined in bash, Ctrl+L bound in both, `aicli cmd --chain` called in both, empty buffer handling
+- **`TestRunShellCommandSandboxing`** (8 tests): `_sandbox_available`, `_build_sandboxed_cmd`, `MAX_OUTPUT_BYTES`, sandboxed/unsandboxed paths, `AICLI_SANDBOX_NET`
+- **`test_rag_integration.py`** (18 `@pytest.mark.slow` tests, 6 classes):
+  - `TestRAGRoundtrip` (5): index→retrieve, empty store, chunk count, status, context block format
+  - `TestRAGMultiSession` (3): correct session, both indexed, high min_score filters weak
+  - `TestRAGSummary` (3): summary indexed, preferred over raw messages
+  - `TestRAGFileIndexing` (4): `index_directory`, file content retrievable, local_chunks in status
+  - `TestRAGDepthScaling` (3): depth=2 returns ≥ depth=1
+
+**Total: 784 pytest (non-slow) + 14 slow RAG · 786 static checks (run_tests.py)**
+
+### Static Checks Added (run_tests.py)
+
+- **Phase 45** (+33): watch+do wiring, multi-turn `--session`, plugin `TOOL_REGISTRY` auto-reg, TUI DoModeScreen/F9, 7 new KNOWN_PROXIED_CLASSES entries
+- **Phase 46** (+17): `_detect_intent` defined, action/query patterns, `@FunctionCall` in executor, dry-run plan header, Ctrl+L in zsh + bash, `TestIntentRouting`/`TestDoCommandUX`/`TestCtrlLChainWidget` registered
+
+### Bugs Fixed
+
+- `ProviderPipeline.complete()` `TypeError` on `tools=` kwarg (text-only pipeline)
+- `UnboundLocalError: tool_schemas` — used before assignment in executor
+- `play_music` `~/` expansion — raw `~` passed to mpv subprocess instead of expanded path
+- `_COMPOUND_RE` `\b` written as `\x08` (ASCII backspace) — compound guard never fired
+- LLM response truncation on multi-tool prompts — compact schema format fix
+- `"browse...and open..."` hitting fast path instead of LLM — compound guard placement
+- `run_tests.py` Phase 46 reading stale `src` variable instead of live file
+- Intent routing false positives: `"write a function"` / `"create a mental model"` / `"copy the first 3 lines"` / `"move the cursor left"` / `"run me through X"` all incorrectly routing to `do` — verb disambiguation fix
+- `test_do_auto_confirm_flag_accepted` — test passed `--auto-confirm` but flag on `do` is `--confirm`
+- `test_summary_pass_calls_pipeline_stream_twice` — `pipeline.complete` mock returned Python list instead of JSON string
+- `test_run_do_command_passes_max_retries_to_dispatch` — prompt `"open example.com"` hit direct dispatch fast path, bypassing LLM mock
+- `mcp_server.py` `_server_version()` fallback string stale at `"1.5.7"` → updated to `"1.6.0"`
+- `run_tests.py` semver check regex didn't match `SERVER_VERSION_IMPORT` assignment pattern
+- `pyproject.toml` missing `beautifulsoup4` from `[full]` and `[all]` extras
+- `requirements.txt` had `pytest`/`pytest-asyncio` as runtime deps (dev-only since v1.5.3)
+
+### Package
+
+- `beautifulsoup4>=4.12.0` added to `[full]`, `[all]`, and new `[web]` extra
+- `[web]` extra: `beautifulsoup4` + `pysocks` — clean install target for `--web` users
+- `mcp_server.py` fallback version string updated to `"1.6.0"`
+- **Published to PyPI 2026-03-16**: `pip install aicli-maxmux==1.6.0`
+
+---
+
+## [1.5.7] — 2026-03-16 (Sessions 14–15 — Test fixes, ShellGPT audit, feature backlog)
+
+### Added
+
+#### `aicli/app.py` — `_FallbackGroup` + CLI flags
+
+- **`_FallbackGroup`** (replaces bare `click.Group`): Intercepts `parse_args` — if the first positional token is not a known subcommand name, stores all args as `ctx.args` and skips subcommand resolution. Fixes `UsageError: No such command 'explain'` on `aicli "explain async await"` and eliminates `ctx.protected_args` DeprecationWarning (Click 9.0 removal path).
+  - Covers all cases: `aicli "explain"`, `aicli explain async await`, `aicli --shell "find files"`, known subcommands still route correctly, `aicli` with no args shows help.
+
+- **`--retries N` flag on `aicli do`**: Exposes `max_retries` to users (was always defaulting to 1).
+  ```bash
+  aicli do --retries 3 "create a Jira ticket for the login bug"
+  ```
+
+- **`--session NAME` flag on `aicli do`**: Multi-turn do mode. Loads up to 10 prior turns from named session and injects before user turn.
+  ```bash
+  aicli do --session myproject "open the config file"
+  aicli do --session myproject "now summarize it"
+  ```
+
+- **`--do ACTION` flag on `aicli ask`**: `--watch` + `--do` integration. When the watch condition fires, automatically dispatches an `aicli do` action with `auto_confirm=True`.
+  ```bash
+  tail -f app.log | aicli ask --watch "OOM killer invoked" \
+      --do "send_notification title='OOM Alert' body='Check app.log'"
+  journalctl -f | aicli ask --watch "disk usage above 90%" \
+      --do "get_system_info detail=disk"
+  ```
+
+- **`--role "..."` on `aicli cmd --chain`**: Custom system prompt for multi-step chain generation.
+
+- **MCP server docstring updated**: `do` tool added to listing (was missing from 4-tool description).
+
+#### `aicli/tools/executor.py` — `max_retries` + `session_id`
+
+- **`max_retries` wired through**: `dispatch_tool_calls` was always called with default `max_retries=1`. Now forwarded from `run_do_command(max_retries=...)`.
+- **`session_id` multi-turn**: `run_do_command(session_id=...)` loads prior turns from SQLite on each call.
+  - Messages: `[system] + [history[-10:]] + [user]`
+  - Session lookup via `get_connection() → list_sessions() → load_messages()`, graceful on failure.
+
+#### `aicli/handlers/default.py` — `--watch` + `--do` integration
+
+- `_ask` signature: `watch_do: str | None = None`
+- `_watch_stdin` signature: `do_action: str | None = None`; logs trigger message on startup
+- `_watch_evaluate` signature: `do_action: str | None = None`
+- When `response.upper().startswith("YES")` and `do_action` set: calls `run_do_command(prompt_parts=(do_action,), auto_confirm=True, ...)`
+- `ImportError` on `run_do_command` handled gracefully (lite installs)
+
+#### `aicli/tui.py` — DoModeScreen (F9)
+
+- **`DoModeScreen`** modal class: `Label` with task examples, `Input` with placeholder, Enter → `dismiss(prompt)`, Escape → `dismiss(None)`
+- **F9 binding**: Added to `BINDINGS` with `priority=True`; entry in ACTIONS list: `("do_mode", "f9", "aicli do — OS function calling")`
+- **`action_do_mode` + `_run_do_command`** on `AicliTUI`: `auto_confirm=True` (TUI is non-interactive). Result appears as assistant message in active chat.
+
+#### `aicli/tools/os_functions.py` — `run_shell_command` `working_dir`
+
+- `run_shell_command` now accepts `working_dir` parameter + schema entry. Missing dir raises `FileNotFoundError`.
+
+#### `aicli/handlers/loader.py` — Plugin auto-registration into TOOL_REGISTRY
+
+- `_load_plugin_file()` checks for `"parameters"` key in plugin dict. If present, auto-registers into `TOOL_REGISTRY` — plugin is now fully available to `aicli do` and the LLM's function-calling system.
+  ```python
+  # ~/.config/aicli/plugins/jira.py
+  def register():
+      return {
+          "name": "create_jira_ticket",
+          "description": "Create a Jira ticket",
+          "parameters": {"title": {"type": "string"}, "description": {"type": "string"}},
+          "confirm": True,
+          "fn": create_jira_ticket,
+      }
+  # → aicli do "create a ticket for the login bug" dispatches create_jira_ticket() automatically
+  ```
+- Silent on `ImportError` (lite installs). Existing plugins without `"parameters"` unchanged.
+
+#### `aicli/shell_integration.zsh` — Alt+I rebind line
+
+- Uncommentable `bindkey '^[i'` line added for users who want Alt+I instead of Ctrl+I.
+
+### Fixed
+
+- **`RuntimeWarning: coroutine never awaited`** (3 locations in `test_os_tools.py`, 1 in `test_streaming.py`): Tests used `patch("aicli.app.asyncio.run")` — a plain `MagicMock` received the coroutine but never awaited or closed it. Fixed by patching the coroutine function directly with `AsyncMock`:
+  - `test_do_dry_run_flag_accepted`, `test_do_auto_confirm_flag_accepted`, `test_do_quiet_flag_accepted`: `patch("aicli.tools.executor.run_do_command", new=AsyncMock())`
+  - `test_chain_flag_exists_on_cmd`: `patch("aicli.app._cmd_chain", new=AsyncMock())`
+
+- **`TestDirectInvocation.test_direct_prompt_routes_to_ask` exit code 2**: Click's `Group.parse_args()` tried to resolve first positional token as subcommand before `cli()` was called. Fixed by `_FallbackGroup`. Also eliminated `ctx.protected_args` DeprecationWarning.
+
+### Tests
+
+- **`TestRunDoCommandMaxRetries`** (3 tests): signature check, value forwarded to dispatch, CLI `--retries 3`
+- **`TestRunShellCommandWorkingDir`** (4 tests): cwd changes correctly, missing dir raises `FileNotFoundError`, defaults work, schema includes `working_dir`
+- **`TestCmdChainRole`** (4 tests): `--role` accepted, value forwarded, defaults to `None`, signature
+- **`TestWatchDoIntegration`** (8 tests): `--do` flag acceptance, value forwarded, default None, signatures, YES dispatches `run_do_command`, NO does not
+- **`TestDoCommandSession`** (5 tests): `--session` flag, `session_id` forwarded, absent → None, signature, backward-compat default
+- **`TestPluginOsToolRegistration`** (5 tests): plugin with `"parameters"` lands in registry, plugin without doesn't, schema `input_schema` format, confirm/safe fields preserved, ImportError silent in lite mode
+- **`TestDoModeScreen`** (17 tests): class exists, Screen subclass, Escape/Enter bindings, action_submit/cancel, Input widget, on_input_submitted, F9 in BINDINGS, action_do_mode, _handle_do_result, _run_do_command (async, auto_confirm=True, redirect_stdout, ImportError guard), do_mode in ACTIONS
+
+**Total: 759 pytest · 717 static checks (run_tests.py)**
+
+### Static Checks Added (run_tests.py)
+
+- **Phase 45** (+33): All items above verified against source files
+- **KNOWN_PROXIED_CLASSES** updated: `TestWatchDoIntegration`, `TestDoCommandSession`, `TestPluginOsToolRegistration`, `TestRunDoCommandMaxRetries`, `TestRunShellCommandWorkingDir`, `TestCmdChainRole`, `TestDoModeScreen`
+
+### ShellGPT Competitive Audit (Final State after S14–S15)
+
+| Feature | ShellGPT | aicli | Advantage |
+|---------|----------|-------|-----------|
+| Function calling | `@FunctionCall` silent | `aicli do` | Confirm gate, dry-run, audit, retry, natural summary |
+| Path auto-detect | ✅ | ✅ + 50KB cap | Prompt injection protection |
+| Ctrl+I next command | History-blind | ✅ tmux scrollback | Sees actual output |
+| Multi-step chain | Ctrl+L, no confirm | `cmd --chain` | [N/total], Y/n/s/q, failure halt |
+| Tool audit log | ❌ | ✅ JSONL | Full tamper-evident record |
+| Dry-run | ❌ | ✅ | Zero risk preview |
+| Tool retry | ❌ | ✅ configurable | `↻ Retry N/max` feedback |
+| Web search | ❌ | ✅ 6-backend | Callable as OS tool |
+| MCP server | ❌ | ✅ 5 tools | Claude Desktop integration |
+| TUI | ❌ | ✅ F9 do mode | Full Textual UI |
+| Session memory | ❌ | ✅ SQLite + RAG | Cross-session context |
+| Provider failover | LiteLLM | ✅ native 5-chain | Groq→OpenRouter→Gemini→Mistral→Ollama |
+
+**Score: aicli 22W / Ties 3 / ShellGPT 0L**
+
+### Files Changed (S14–S15)
+
+| File | Lines Before | Lines After | Net |
+|------|-------------|-------------|-----|
+| `aicli/app.py` | 1,838 | 1,887 | +49 |
+| `aicli/tools/executor.py` | 379 | 408 | +29 |
+| `aicli/handlers/default.py` | 509 | 548 | +39 |
+| `aicli/tui.py` | 1,632 | 1,715 | +83 |
+| `aicli/tools/os_functions.py` | 623 | 636 | +13 |
+| `aicli/handlers/loader.py` | 161 | 207 | +46 |
+| `aicli/shell_integration.zsh` | 160 | 163 | +3 |
+| `tests/test_os_tools.py` | 573 | 681 | +108 |
+| `tests/test_streaming.py` | 543 | 596 | +53 |
+
+**Zero deletions across all 9 files.**
 
 ---
 
@@ -45,9 +317,7 @@ All notable changes to aicli-maxmux are documented here.
   ```
   - Reads stdin line-by-line without blocking the event loop (`run_in_executor`)
   - Buffers `watch_lines` lines (default 10), sends each batch to LLM as:
-    `CONDITION TO WATCH FOR: <condition>
-LOG LINES:
-<batch>`
+    `CONDITION TO WATCH FOR: <condition>\nLOG LINES:\n<batch>`
   - LLM responds `YES: reason` → timestamped `[ALERT HH:MM:SS]` printed with triggering batch
   - LLM responds `NO` → completely silent
   - Handles EOF (evaluates partial final batch), Ctrl+C exits cleanly
@@ -85,7 +355,7 @@ framing the raw terminal dump, not the other way around.
 
 #### `app.py` — Zero-config start: auto-detect existing env keys
 - `aicli setup` now scans for `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`,
-  `MISTRAL_API_KEY` in the environment and auto-saves them — no manual entry required (via  detection)
+  `MISTRAL_API_KEY` in the environment and auto-saves them — no manual entry required
 - Detects `OPENAI_API_KEY` and suggests OpenRouter as compatible drop-in
 - `aicli "hello"` just works if any standard key env var is already set
 
@@ -148,8 +418,7 @@ framing the raw terminal dump, not the other way around.
 #### `app.py` — Stale `/tmp/` path auto-cleanup in `config install-shell`
 - **Root cause**: `test_install_shell_detects_zsh` patched `aicli.app.CONFIG_DIR` → temp dir but
   did not patch `pathlib.Path.home()`. This caused `rc_file = Path.home() / ".zshrc"` to resolve
-  to the real `~/.zshrc`, writing `source "/tmp/tmpXXXXXX/shell_integration.zsh"` into it on
-  every test run — two dead entries accumulated.
+  to the real home directory in tests, writing a real `.zshrc` entry.
 - **Production fix**: `config_install_shell()` now strips stale `/tmp/` source lines before
   appending the permanent path:
   ```python
@@ -271,23 +540,6 @@ framing the raw terminal dump, not the other way around.
 - **Phase 15 AsyncMock anti-pattern checks** (3 added): locks in `async def stream` pattern across test_new_commands.py, test_mcp_server.py, test_comprehensive.py
 - **Phase 16 PYTEST_ONLY auto-generation**: replaced static list with `glob.glob("tests/test_*.py")` class scanner + `KNOWN_PROXIED_CLASSES` exclusion set
 
-### Tests
-
-New test classes (all passing):
-
-- **`TestServeDaemon`** (4 tests, `test_new_commands.py`) — `--daemon` flag present, `stop_serve()` routing, missing PID graceful, PID file path
-- **`TestHistorySearch`** (4 tests, `test_new_commands.py`) — command exists, requires query, no-chromadb graceful, no-indexed-data message
-- **`TestStatsCommand`** (4 tests, `test_new_commands.py`) — command exists, no-sessions OK, shows summary, `--session` flag graceful
-- **`TestMCPToolCallAsk` RAG** (2 new tests, `test_mcp_server.py`) — RAG context injected when available, continues without chromadb
-
-**Total tests: 683 passing** (up from 669)
-**Static checks: 482/482** (`python3 run_tests.py`)
-
----
-
-
-### Added
-
 #### MCP Server (`handlers/mcp_server.py`) — 703 lines
 - **`aicli mcp`** — new top-level command, starts a Model Context Protocol server for Claude Desktop integration
   - `aicli mcp` — stdio transport (default, for Claude Desktop `mcpServers` config)
@@ -316,14 +568,12 @@ New test classes (all passing):
   - Merges new tags into `graph_links.json` without overwriting existing tags
   - Handles `JSONDecodeError` gracefully
 
-### Fixed
-
-#### `app.py`
+#### `app.py` fixes
 - **Lazy import shadow bugs (3)**: `CONFIG_DIR`, `run_serve`, and `CONFIG_DIR` in `tag()` were re-imported inside function bodies, silently defeating `patch()` in tests. All moved to module-level imports.
 - **Duplicate `def tag`**: First (weaker) definition removed
 - **Shebang position**: `__version__` import was before shebang; shebang moved to line 1
 
-#### `handlers/mcp_server.py`
+#### `handlers/mcp_server.py` fixes
 - **`asyncio.BaseProtocol` misuse**: `connect_write_pipe(BaseProtocol, stdout)` replaced with `sys.stdout.buffer`
 - **`asyncio.Queue` in sync thread**: Replaced with `queue.SimpleQueue` in SSE transport
 - **`asyncio.get_event_loop()` deprecated** (Python 3.12+): Replaced with `asyncio.get_running_loop()`
@@ -353,17 +603,20 @@ New and updated test suites (`tests/` — all passing):
 - **`test_comprehensive.py`** (245 tests, 22 classes) — master regression suite covering every bug S1-1 through V3-4, all CLI commands, all flags, all MCP protocol paths, env var mirrors, shell scripts
 - **`tests/conftest.py`** — session-scoped `aicli_cli` fixture (import once per run), `_BindingStub` stub (no async GC warnings), `slow`/`fast`/`serve` pytest markers, module-level `aicli.app` pre-warm
 - **`run_tests.py`** — 467 static checks across 32 phases, `--time` flag, runs in 0.15s
-- **Bug fixes in existing tests**:
+- **`TestServeDaemon`** (4 tests, `test_new_commands.py`) — `--daemon` flag present, `stop_serve()` routing, missing PID graceful, PID file path
+- **`TestHistorySearch`** (4 tests, `test_new_commands.py`) — command exists, requires query, no-chromadb graceful, no-indexed-data message
+- **`TestStatsCommand`** (4 tests, `test_new_commands.py`) — command exists, no-sessions OK, shows summary, `--session` flag graceful
+- **`TestMCPToolCallAsk` RAG** (2 new tests, `test_mcp_server.py`) — RAG context injected when available, continues without chromadb
+- Bug fixes in existing tests:
   - `test_comprehensive.py`: `inspect.getsource(cmd)` → `.callback` for Click commands
   - `test_tui_pure.py`: `HotkeyInput._on_key` → `on_key`; `str(BINDINGS)` → `getsource` text search
   - `test_new_commands.py`: `getpass.getpass` mocked; `sys.stdin` mocked; `ContextRetriever` patch path fixed; `AsyncMock(return_value=aiter(...))` anti-pattern replaced with proper async generators
-  - `test_serve.py`: Hardcoded ports (18801–18807) → `_free_port()` OS-assigned; `load_config` + `get_role` patched; `pytestmark = pytest.mark.slow`
+  - `test_serve.py`: Hardcoded ports → `_free_port()` OS-assigned; `load_config` + `get_role` patched; `pytestmark = pytest.mark.slow`
   - `test_web_search.py`: All 6 backends now patched in every test (3 tests were hitting real network, causing 166s slowdown)
   - `test_graph_server.py`: 7× `time.sleep(0.05/0.1)` → `_wait_for_port()` socket polling
 
-**Total tests: 669 passing** (up from 354 after v1.5.3)  
-**Static checks: 467/467** (`python3 run_tests.py`)  
-**Full suite runtime: ~30s** (down from 3+ minutes; 166s web search timeouts eliminated)
+**Total tests: 683 passing** (up from 669)
+**Static checks: 482/482** (`python3 run_tests.py`)
 
 ---
 
@@ -486,7 +739,7 @@ New test suites added (`tests/` — all passing):
   - `TestObsidianExport` (12 tests): frontmatter, callouts, anchors, summary, message content
 - **`test_graph_server.py`** — extended with `TestNodeTags` (10 tests): tag save/load roundtrip, `/api/tags` filter, case-insensitive matching, HTML tag bar/panel/chips presence
 
-Total new tests this release: **~107** (193 existing + 107 new = **~300 passing**)
+**Total new tests this release: ~107** (193 existing + 107 new = **~300 passing**)
 
 ---
 
@@ -628,8 +881,6 @@ The following items were scoped and documented this session for upcoming release
 - Added `TestPluginInstallDoc` (2 tests): async fn wrapper, missing version warning
 - Added `TestCrossSessionRAG` (2 tests): cross-session retrieval, isolation verification
 - Added `TestContextDebugSnippet` (3 tests): sentence-boundary truncation
-
----
 
 ---
 
