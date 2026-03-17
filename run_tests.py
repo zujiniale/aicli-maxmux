@@ -45,6 +45,13 @@ def read(rel):
         return ""
 
 
+# ── Extract current version dynamically from __version__.py ──────────────────
+# This means version checks never need manual updating after a bump.
+_ver_src = read("aicli/__version__.py")
+_ver_match = re.search(r'__version__\s*=\s*"([^"]+)"', _ver_src)
+CURRENT_VERSION = _ver_match.group(1) if _ver_match else "0.0.0"
+
+
 def header(title, _last=[None]):
     if TIMING and _last[0] is not None:
         elapsed = _time.monotonic() - _last[0][1]
@@ -116,10 +123,10 @@ ver = read("aicli/__version__.py")
 pyproject = read("pyproject.toml")
 
 check("__version__.py defines __version__", '__version__' in ver)
-check("version is 1.6.1", '1.6.1' in ver,
-      "Run: python bump_version.py 1.6.1")
-check("pyproject.toml version is 1.6.1", 'version = "1.6.1"' in pyproject,
-      "Run: python bump_version.py 1.6.1")
+check(f"version is {CURRENT_VERSION}", CURRENT_VERSION in ver,
+      f"Run: python bump_version.py {CURRENT_VERSION}")
+check(f"pyproject.toml version is {CURRENT_VERSION}", f'version = "{CURRENT_VERSION}"' in pyproject,
+      f"Run: python bump_version.py {CURRENT_VERSION}")
 check("pyproject.toml aicli entry point", 'aicli = "aicli.app:main"' in pyproject)
 check("pyproject.toml aicli-lite entry point", 'aicli-lite = "aicli.app:main_lite"' in pyproject)
 check("pyproject.toml [lite] extra exists", "[lite]" in pyproject or "lite = [" in pyproject)
@@ -268,9 +275,9 @@ check("_LANG_DISPLAY dict: Node.js correct casing", '"Node.js"' in mcp)
 check("_server_version reads __version__.py",
       "from aicli.__version__ import __version__" in mcp,
       "Add: from aicli.__version__ import __version__ in _server_version()")
-check("_server_version fallback is 1.6.1",
-      '"1.6.1"' in mcp,
-      "Update _server_version() fallback string to 1.6.1")
+check(f"_server_version fallback is {CURRENT_VERSION}",
+      f'"{CURRENT_VERSION}"' in mcp,
+      f"Update _server_version() fallback string to {CURRENT_VERSION}")
 check("no lazy CONFIG_DIR re-import in _tool_tag",
       mcp.count("from ..config import") <= 1)
 # S12: 5 tools now (ask cmd code tag do)

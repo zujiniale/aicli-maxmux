@@ -45,6 +45,17 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
+# ── Dynamic version — never needs manual update after bump_version.py ─────────
+def _get_current_version() -> str:
+    try:
+        ver_file = Path(__file__).parent.parent / "aicli" / "__version__.py"
+        m = re.search(r'__version__\s*=\s*"([^"]+)"', ver_file.read_text())
+        return m.group(1) if m else "0.0.0"
+    except Exception:
+        return "0.0.0"
+
+CURRENT_VERSION = _get_current_version()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared fixtures
@@ -112,7 +123,8 @@ class TestProjectStructure:
 
     def test_version_is_1_5_4(self):
         cfg = self._get_pyproject()
-        assert cfg["project"]["version"] == "1.6.1"
+        assert cfg["project"]["version"] == CURRENT_VERSION, \
+            f"pyproject.toml version {cfg['project']['version']!r} != __version__.py {CURRENT_VERSION!r} — run: python bump_version.py {CURRENT_VERSION}"
 
     def test_version_is_semver(self):
         cfg = self._get_pyproject()

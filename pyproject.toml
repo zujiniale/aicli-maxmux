@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aicli-maxmux"
-version = "1.6.1"
+version = "1.6.3"
 description = "Free, private, terminal-native AI CLI with multi-provider failover, persistent memory, web search, vision, TUI, session graph, and plugin system"
 readme = "README.md"
 requires-python = ">=3.11"
