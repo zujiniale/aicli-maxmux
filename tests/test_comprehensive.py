@@ -112,7 +112,7 @@ class TestProjectStructure:
 
     def test_version_is_1_5_4(self):
         cfg = self._get_pyproject()
-        assert cfg["project"]["version"] == "1.6.0"
+        assert cfg["project"]["version"] == "1.6.1"
 
     def test_version_is_semver(self):
         cfg = self._get_pyproject()

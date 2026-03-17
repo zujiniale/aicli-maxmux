@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.1] — 2026-03-17
+
+### Added
+
+*(fill in release notes)*
+
+---
+
+
 All notable changes to aicli-maxmux are documented here.
 
 ---

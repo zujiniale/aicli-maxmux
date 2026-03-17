@@ -116,10 +116,10 @@ ver = read("aicli/__version__.py")
 pyproject = read("pyproject.toml")
 
 check("__version__.py defines __version__", '__version__' in ver)
-check("version is 1.6.0", '1.6.0' in ver,
-      "Run: python bump_version.py 1.6.0")
-check("pyproject.toml version is 1.6.0", 'version = "1.6.0"' in pyproject,
-      "Run: python bump_version.py 1.6.0")
+check("version is 1.6.1", '1.6.1' in ver,
+      "Run: python bump_version.py 1.6.1")
+check("pyproject.toml version is 1.6.1", 'version = "1.6.1"' in pyproject,
+      "Run: python bump_version.py 1.6.1")
 check("pyproject.toml aicli entry point", 'aicli = "aicli.app:main"' in pyproject)
 check("pyproject.toml aicli-lite entry point", 'aicli-lite = "aicli.app:main_lite"' in pyproject)
 check("pyproject.toml [lite] extra exists", "[lite]" in pyproject or "lite = [" in pyproject)
@@ -268,9 +268,9 @@ check("_LANG_DISPLAY dict: Node.js correct casing", '"Node.js"' in mcp)
 check("_server_version reads __version__.py",
       "from aicli.__version__ import __version__" in mcp,
       "Add: from aicli.__version__ import __version__ in _server_version()")
-check("_server_version fallback is 1.6.0",
-      '"1.6.0"' in mcp,
-      "Update _server_version() fallback string to 1.6.0")
+check("_server_version fallback is 1.6.1",
+      '"1.6.1"' in mcp,
+      "Update _server_version() fallback string to 1.6.1")
 check("no lazy CONFIG_DIR re-import in _tool_tag",
       mcp.count("from ..config import") <= 1)
 # S12: 5 tools now (ask cmd code tag do)

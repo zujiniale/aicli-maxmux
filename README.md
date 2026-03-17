@@ -1,6 +1,6 @@
 # aicli-maxmux
 
-![Version](https://img.shields.io/badge/version-1.6.0-ff4488) ![Tests](https://img.shields.io/badge/tests-784%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.11%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80) ![Lite](https://img.shields.io/badge/lite%20mode-%7E20MB-a855f7) ![PyPI](https://img.shields.io/badge/pypi-aicli--maxmux-blue)
+![Version](https://img.shields.io/badge/version-1.6.1-ff4488) ![Tests](https://img.shields.io/badge/tests-784%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.11%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80) ![Lite](https://img.shields.io/badge/lite%20mode-%7E20MB-a855f7) ![PyPI](https://img.shields.io/badge/pypi-aicli--maxmux-blue)
 
 A free, private, terminal-native AI CLI with multi-provider failover, persistent memory,
 web search, vision support, autonomous agent mode, and OS function calling.
@@ -575,7 +575,7 @@ All commands work in lite mode except `--context` (RAG) and `aicli tui`.
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
-**Latest: v1.6.0** — `_detect_intent` smart routing · `@FunctionCall` display · silent execution by default · Ctrl+L chain widget (zsh + bash) · direct dispatch fast path (~50ms) · `play_music`/`browse_media` overhaul · tool sandboxing · TUI DoModeScreen confirm toggle · `beautifulsoup4` + `[web]` extra · 784 pytest + 14 slow RAG · 786 static checks · **published to PyPI 2026-03-16**
+**Latest: v1.6.1** — `_detect_intent` smart routing · `@FunctionCall` display · silent execution by default · Ctrl+L chain widget (zsh + bash) · direct dispatch fast path (~50ms) · `play_music`/`browse_media` overhaul · tool sandboxing · TUI DoModeScreen confirm toggle · `beautifulsoup4` + `[web]` extra · 784 pytest + 14 slow RAG · 786 static checks · **published to PyPI 2026-03-16**
 
 **v1.5.7** — `_FallbackGroup` Click fix · `--retries`/`--session`/`--do` flags · plugin TOOL_REGISTRY auto-registration · DoModeScreen F9 · `run_shell_command` working_dir · 759 tests
 

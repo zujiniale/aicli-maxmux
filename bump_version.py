@@ -33,8 +33,8 @@ FILES = [
     ),
     (
         "aicli/handlers/mcp_server.py",
-        r'"[0-9]+\.[0-9]+\.[0-9]+"(\s*#.*fallback)',
-        '"{version}"\\1',
+        r'(SERVER_VERSION_IMPORT\s*=\s*)"[0-9]+\.[0-9]+\.[0-9]+"',
+        '\\1"{version}"',
     ),
     (
         "map_structure.sh",
