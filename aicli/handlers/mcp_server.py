@@ -71,7 +71,7 @@ def _server_version() -> str:
             from aicli.__version__ import __version__
             SERVER_VERSION_IMPORT = __version__
         except Exception:
-            SERVER_VERSION_IMPORT = "1.6.3"
+            SERVER_VERSION_IMPORT = "1.6.4"
     return SERVER_VERSION_IMPORT
 
 

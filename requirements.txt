@@ -1,24 +1,40 @@
-# aicli — Python 3.11+ required (tomllib is stdlib from 3.11)
-# Install with: pip install -r requirements.txt
-# Optional (Linux): clipboard support requires `xclip`
-# Install with: sudo apt install xclip
+# aicli-maxmux — Python 3.11+ required (tomllib is stdlib from 3.11)
+#
+# ── Install modes ─────────────────────────────────────────────────────────────
+#   Lite (~20MB, no RAG/TUI):  pip install "aicli-maxmux[lite]"
+#   Full (~468MB, all features): pip install "aicli-maxmux[all]"
+#   From this file:             pip install -r requirements.txt
+#
+# ── Optional system packages (apt/brew, not pip) ──────────────────────────────
+#   xclip          — TUI clipboard on Linux:    sudo apt install xclip
+#   firejail       — tool sandboxing (AICLI_SANDBOX=1): sudo apt install firejail
+#   playerctl      — media control (play_music tool): sudo apt install playerctl
+#   mpv            — media playback (play_music/browse_media): sudo apt install mpv
 
-# ── Required ──────────────────────────────────────────────────────────────────
+# ── Core (lite-compatible) ────────────────────────────────────────────────────
 cryptography>=42.0.0        # Fernet encryption: API key storage + chat history
 click>=8.1.0                # CLI framework (commands, groups, options, flags)
-pytest>=9.0.0               # Test runner
-pytest-asyncio>=0.23.0      # Required for async test suite execution
 tiktoken>=0.7.0             # Exact token counting
-
-# ── Drop-in upgrades (install when ready — no code changes needed) ────────────
 keyring>=25.0.0             # OS keychain for API keys (falls back to Fernet file)
 httpx>=0.27.0               # Native async HTTP (falls back to urllib)
 rich>=13.0.0                # Terminal markdown + syntax highlighting (falls back to plain print)
 
-# ── F7: TUI ───────────────────────────────────────────────────────────────────
-textual>=0.59.0,<1.0.0      # Terminal UI framework for tui.py (sidebar, chat, input bar)
-#                           # Graceful import error if not installed (optional for CLI-only use)
+# ── Web search backends (--web flag, 6-backend chain) ─────────────────────────
+beautifulsoup4>=4.12.0      # HTML scraping for Bing + Mojeek backends
+pysocks>=1.7.1              # SOCKS5/Tor proxy support (AICLI_PROXY=socks5://...)
+#                           # Install: pip install pysocks
+#                           # Usage:   aicli config set AICLI_PROXY socks5://127.0.0.1:9050
 
-# ── Phase 5: RAG ─────────────────────────────────────────────────────────────
-chromadb>=0.5.0             # Vector store for LocalContext + ChatContextStore
-#                           # Implements context/embeddings.py + context/retriever.py
+# ── TUI (aicli tui) ───────────────────────────────────────────────────────────
+textual>=0.59.0,<1.0.0      # Terminal UI framework for tui.py (sidebar, chat, input bar)
+#                           # Graceful import error if not installed (CLI-only use still works)
+
+# ── RAG / semantic memory (aicli --context, aicli history) ───────────────────
+chromadb>=0.5.0             # Vector store for cross-session RAG retrieval
+sentence-transformers>=3.0.0  # Local embeddings for ChromaDB (faster, no API key needed)
+#                           # Both are optional — all commands work without them (lite mode)
+
+# ── Dev only (not required at runtime) ───────────────────────────────────────
+# pytest>=9.0.0             # Test runner — install via: pip install "aicli-maxmux[dev]"
+# pytest-asyncio>=0.23.0    # Async test suite — install via: pip install "aicli-maxmux[dev]"
+#                           # Note: these were incorrectly in core deps before v1.5.3

@@ -1,6 +1,6 @@
 # aicli-maxmux
 
-![Version](https://img.shields.io/badge/version-1.6.2-ff4488) ![Tests](https://img.shields.io/badge/tests-784%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.11%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80) ![Lite](https://img.shields.io/badge/lite%20mode-%7E20MB-a855f7) ![PyPI](https://img.shields.io/badge/pypi-aicli--maxmux-blue)
+![Version](https://img.shields.io/badge/version-1.6.4-ff4488) ![Tests](https://img.shields.io/badge/tests-784%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.11%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80) ![Lite](https://img.shields.io/badge/lite%20mode-%7E20MB-a855f7) ![PyPI](https://img.shields.io/badge/pypi-aicli--maxmux-blue)
 
 A free, private, terminal-native AI CLI with multi-provider failover, persistent memory,
 web search, vision support, autonomous agent mode, and OS function calling.
@@ -575,7 +575,7 @@ All commands work in lite mode except `--context` (RAG) and `aicli tui`.
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
-**Latest: v1.6.2** — patch fixes: dynamic version checks in `run_tests.py` + `test_comprehensive.py` (no manual edits after bump), `bump_version.py` mcp pattern fix, post-release test mock fixes · v1.6.1: test fixes, mcp fallback, expanded README · v1.6.0: `_detect_intent`, `@FunctionCall`, Ctrl+L, direct dispatch, sandboxing, RAG tests · **pip install aicli-maxmux**
+**Latest: v1.6.4** — mcp_server.py fallback fix · `release.sh` pre-flight version check · v1.6.3: `release.sh` one-command release pipeline · v1.6.2: dynamic version checks · v1.6.1: test fixes · v1.6.0: `_detect_intent`, `@FunctionCall`, Ctrl+L, sandboxing · **pip install aicli-maxmux**
 
 **v1.5.7** — `_FallbackGroup` Click fix · `--retries`/`--session`/`--do` flags · plugin TOOL_REGISTRY auto-registration · DoModeScreen F9 · `run_shell_command` working_dir · 759 tests
 
@@ -629,6 +629,8 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 | v1.6.0 | **Published to PyPI** — `pip install aicli-maxmux==1.6.0` | ✅ Done |
 | v1.6.1 | Post-release test mock fixes · mcp fallback · expanded README sections | ✅ Done |
 | v1.6.2 | Dynamic version checks — `run_tests.py` + `test_comprehensive.py` auto-read `__version__.py` · `bump_version.py` mcp pattern fix | ✅ Done |
+| v1.6.3 | `release.sh` one-command release pipeline (test → bump → build → tag → push → publish) | ✅ Done |
+| v1.6.4 | `mcp_server.py` fallback version fix · `release.sh` pre-flight mcp version check | ✅ Done |
 | v1.5.x | Missing TUI widget tests (`TestTUI` live render) | 📋 Scoped |
 | v1.5.x | `aicli serve --daemon` Windows port (os.fork is Unix-only) | 📋 Scoped |
 | v1.7.x | Next feature cycle | 🔜 Upcoming |

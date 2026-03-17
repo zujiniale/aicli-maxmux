@@ -4,6 +4,35 @@ All notable changes to aicli-maxmux are documented here.
 
 ---
 
+## [1.6.4] — 2026-03-16 (Patch — mcp_server.py version fallback fix)
+
+### Fixed
+
+- `mcp_server.py` `SERVER_VERSION_IMPORT` fallback was still `"1.3.x"` — `bump_version.py` pattern was not being applied correctly on this machine; fixed manually via `sed` and verified with `grep`
+- `release.sh` now includes a pre-flight mcp_server.py version check that blocks the release if the fallback is stale — prevents this from ever happening again
+- `run_tests.py` + `test_comprehensive.py` version checks confirmed dynamic (no manual edit needed)
+
+**Published to PyPI 2026-03-16**: `pip install aicli-maxmux==1.6.4`
+
+---
+
+## [1.6.3] — 2026-03-16 (Patch — release script + version automation)
+
+### Added
+
+- `release.sh` — one-command release pipeline: validates git state, runs full test suite, bumps version, builds wheel + sdist, runs twine check, commits + tags + pushes, uploads to PyPI
+- `--dry-run` flag: preview every step without writing or uploading anything
+- `--current` flag: print current version and exit
+- Colour-coded output with per-step status
+
+### Fixed
+
+- `bump_version.py` mcp_server.py pattern confirmed working for `SERVER_VERSION_IMPORT = "x.y.z"` assignment
+
+**Published to PyPI 2026-03-16**: `pip install aicli-maxmux==1.6.3`
+
+---
+
 ## [1.6.2] — 2026-03-16 (Patch — dynamic version checks)
 
 ### Fixed
