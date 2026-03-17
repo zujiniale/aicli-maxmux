@@ -1,6 +1,6 @@
 # aicli-maxmux
 
-![Version](https://img.shields.io/badge/version-1.6.3-ff4488) ![Tests](https://img.shields.io/badge/tests-784%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.11%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80) ![Lite](https://img.shields.io/badge/lite%20mode-%7E20MB-a855f7) ![PyPI](https://img.shields.io/badge/pypi-aicli--maxmux-blue)
+![Version](https://img.shields.io/badge/version-1.6.2-ff4488) ![Tests](https://img.shields.io/badge/tests-784%20passing-22c55e) ![Python](https://img.shields.io/badge/python-3.11%2B-4f8ef7) ![License](https://img.shields.io/badge/license-MIT-6b6b80) ![Lite](https://img.shields.io/badge/lite%20mode-%7E20MB-a855f7) ![PyPI](https://img.shields.io/badge/pypi-aicli--maxmux-blue)
 
 A free, private, terminal-native AI CLI with multi-provider failover, persistent memory,
 web search, vision support, autonomous agent mode, and OS function calling.
@@ -575,7 +575,7 @@ All commands work in lite mode except `--context` (RAG) and `aicli tui`.
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
-**Latest: v1.6.3** — `_detect_intent` smart routing · `@FunctionCall` display · silent execution by default · Ctrl+L chain widget (zsh + bash) · direct dispatch fast path (~50ms) · `play_music`/`browse_media` overhaul · tool sandboxing · TUI DoModeScreen confirm toggle · `beautifulsoup4` + `[web]` extra · 784 pytest + 14 slow RAG · 786 static checks · **published to PyPI 2026-03-16**
+**Latest: v1.6.2** — patch fixes: dynamic version checks in `run_tests.py` + `test_comprehensive.py` (no manual edits after bump), `bump_version.py` mcp pattern fix, post-release test mock fixes · v1.6.1: test fixes, mcp fallback, expanded README · v1.6.0: `_detect_intent`, `@FunctionCall`, Ctrl+L, direct dispatch, sandboxing, RAG tests · **pip install aicli-maxmux**
 
 **v1.5.7** — `_FallbackGroup` Click fix · `--retries`/`--session`/`--do` flags · plugin TOOL_REGISTRY auto-registration · DoModeScreen F9 · `run_shell_command` working_dir · 759 tests
 
@@ -627,6 +627,8 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 | v1.6.0 | `beautifulsoup4` in `[full]`/`[all]` + new `[web]` extra | ✅ Done |
 | v1.6.0 | 784 pytest (non-slow) + 14 slow · 786 static checks | ✅ Done |
 | v1.6.0 | **Published to PyPI** — `pip install aicli-maxmux==1.6.0` | ✅ Done |
+| v1.6.1 | Post-release test mock fixes · mcp fallback · expanded README sections | ✅ Done |
+| v1.6.2 | Dynamic version checks — `run_tests.py` + `test_comprehensive.py` auto-read `__version__.py` · `bump_version.py` mcp pattern fix | ✅ Done |
 | v1.5.x | Missing TUI widget tests (`TestTUI` live render) | 📋 Scoped |
 | v1.5.x | `aicli serve --daemon` Windows port (os.fork is Unix-only) | 📋 Scoped |
 | v1.7.x | Next feature cycle | 🔜 Upcoming |

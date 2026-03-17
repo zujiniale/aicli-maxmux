@@ -1,33 +1,34 @@
 # Changelog
 
-## [1.6.3] — 2026-03-17
-
-### Added
-
-*(fill in release notes)*
-
----
-
-
-## [1.6.2] — 2026-03-17
-
-### Added
-
-*(fill in release notes)*
-
----
-
-
-## [1.6.1] — 2026-03-17
-
-### Added
-
-*(fill in release notes)*
-
----
-
-
 All notable changes to aicli-maxmux are documented here.
+
+---
+
+## [1.6.2] — 2026-03-16 (Patch — dynamic version checks)
+
+### Fixed
+
+- `run_tests.py` version checks now read `CURRENT_VERSION` dynamically from `aicli/__version__.py` — no manual edits needed after `python bump_version.py X.Y.Z`
+- `test_comprehensive.py` version assertion now uses `CURRENT_VERSION` from `__version__.py` — same, fully automatic
+- `bump_version.py` `mcp_server.py` pattern fixed: was matching `"x.y.z" # fallback` (comment required) — now correctly matches `SERVER_VERSION_IMPORT = "x.y.z"` assignment pattern, so `mcp_server.py` is always updated on every bump
+
+**Published to PyPI 2026-03-16**: `pip install aicli-maxmux==1.6.2`
+
+---
+
+## [1.6.1] — 2026-03-16 (Patch — post-release fixes)
+
+### Fixed
+
+- `test_os_tools.py::TestDoCommand::test_do_auto_confirm_flag_accepted` — test passed `--auto-confirm` but the flag on `aicli do` is `--confirm` (opt-in gate); fixed to use correct flag
+- `test_os_tools.py::TestNaturalSummaryPass::test_summary_pass_calls_pipeline_stream_twice` — `pipeline.complete` mock returned a Python list but executor expects a plain JSON string; fixed mock to return `json.dumps([...])`
+- `test_os_tools.py::TestRunDoCommandMaxRetries::test_run_do_command_passes_max_retries_to_dispatch` — prompt `"open example.com"` hit the direct dispatch fast path, bypassing the LLM mock entirely; changed to `"send email to alice@example.com"` which always goes through LLM path
+- `run_tests.py` `_server_version fallback` check and `version is X.Y.Z` checks updated to `1.6.1`
+- `test_comprehensive.py` version assertion updated to `1.6.1`
+- `mcp_server.py` `_server_version()` fallback string updated from `"1.6.0"` → `"1.6.1"`
+- `README.md` + `CHANGELOG.md` expanded: added dedicated sections for Lite Mode, Modularity, Privacy & Security, Interface & UX
+
+**Published to PyPI 2026-03-16**: `pip install aicli-maxmux==1.6.1`
 
 ---
 
